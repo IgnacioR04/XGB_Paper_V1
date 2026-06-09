@@ -75,10 +75,12 @@ scheduler:
     "1h": 30
     "4h": 60
   # Maximo retraso aceptable desde el cierre de vela para procesar
+  # GitHub Actions suele arrancar 5-10 min tarde, asi que estos valores
+  # estan ajustados a "todavia es la vela actual" o un poco mas
   max_late_minutes:
-    "15m": 4
-    "1h": 8
-    "4h": 15
+    "15m": 12         # casi toda la vela siguiente sigue siendo valido
+    "1h": 45          # 3/4 de la vela siguiente
+    "4h": 180         # 3/4 de la vela siguiente
 
 # ---------------------------------------------------------------
 # Modo de features

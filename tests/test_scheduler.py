@@ -44,3 +44,14 @@ def test_due_window_too_late():
     # Para 15m la ultima vela cerrada en 14:25 es la de 14:00-14:15. cierre+delay+late = 14:15+0:20+4min = 14:19:20
     assert by_tf["15m"]["is_late"] is True
     assert by_tf["15m"]["is_due"] is False
+
+
+def test_due_window_with_realistic_late_threshold():
+    # Con max_late 15m=12, GitHub Actions arrancando a 14:25 (10 min tarde)
+    # SI debe procesarse la vela 14:00-14:15
+    now = dt.datetime(2026, 6, 9, 14, 25, 0, tzinfo=dt.timezone.utc)
+    due = get_due_timeframes(now, {"15m": 20, "1h": 30, "4h": 60},
+                              {"15m": 12, "1h": 45, "4h": 180})
+    by_tf = {d["timeframe"]: d for d in due}
+    assert by_tf["15m"]["is_due"] is True
+    assert by_tf["15m"]["is_late"] is False
