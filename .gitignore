@@ -14,19 +14,19 @@ env/
 
 # ------- Data en disco (estado runtime) -------
 data/live_raw/
-data/live_features/
-data/state/wallet_*.json
-data/state/open_positions.json
-data/state/processed_candles.json
-data/paper_trades/
-data/logs/
-
 # Pero conservar los placeholders del repo
 !data/state/.gitkeep
 !data/paper_trades/.gitkeep
 !data/logs/.gitkeep
 !data/live_raw/.gitkeep
 !data/live_features/.gitkeep
+!data/dashboard/.gitkeep
+
+# Los logs de paper_trader.log (texto plano) NO los queremos en git,
+# pero los CSVs de auditoria SI:
+data/logs/*.log
+!data/logs/decisions/
+!data/logs/features/
 
 # ------- Dashboard JSON regenerado en cada tick -------
 dashboard/data/*.json

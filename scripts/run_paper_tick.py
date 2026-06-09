@@ -36,6 +36,7 @@ from src.features.live_feature_builder import build_live_features
 from src.features.macro_cache import load_cache, to_feature_dict
 from src.portfolio import wallet as wallet_mod
 from src.strategy.signal_engine import evaluate_timeframe
+from src.utils.csv_logger import append_decision, append_features
 from src.utils.logging_utils import setup_logger
 from src.utils.time_utils import (
     candle_close_time, get_due_timeframes, make_signal_id, to_utc,
@@ -139,6 +140,7 @@ def run_tick(cfg, args) -> int:
             continue
 
         last_row = feats.iloc[-1]
+        candle_open = feats.index[-1].to_pydatetime() if hasattr(feats.index[-1], "to_pydatetime") else feats.index[-1]
         log.info("[%s] Last candle: %s, close=%.2f",
                  tf, feats.index[-1], last_row.get("ohlcv_btc_close", float("nan")))
 
@@ -151,6 +153,13 @@ def run_tick(cfg, args) -> int:
         vol_pred = predict_vol_ewma(ohlc, span=strat["volatility"]["ewma_span"])
         decile = vol_to_decile(vol_pred, vol_bounds[tf])
         log.info("[%s] vol_pred=%.6f -> decile=%d", tf, vol_pred, decile)
+
+        # Log la fila de features que se va a pasar al modelo (auditoria)
+        try:
+            append_features(cfg.logs_dir, last_row, tf, now, candle_open,
+                             vol_pred, decile)
+        except Exception as e:
+            log.warning("[%s] Could not append features CSV: %s", tf, e)
 
         # 4c. Senal
         band = paper["probability_bands"][tf]
@@ -179,18 +188,66 @@ def run_tick(cfg, args) -> int:
                  {k: v for k, v in diag.items() if k not in ("all_scored",)})
 
         winner = result["winner"]
+
+        # Construir base del registro de decision (los campos comunes)
+        decision_row = {
+            "tick_ts_utc": now.isoformat(),
+            "timeframe": tf,
+            "candle_open_time": candle_open.isoformat() if hasattr(candle_open, "isoformat") else str(candle_open),
+            "candle_close_time": close_t.isoformat() if hasattr(close_t, "isoformat") else str(close_t),
+            "btc_close": float(last_row.get("ohlcv_btc_close", float("nan"))),
+            "vol_pred": vol_pred,
+            "vol_decile": decile,
+            "n_candidates_initial": diag.get("n_candidates_initial", 0),
+            "n_in_band": diag.get("n_in_band", 0),
+            "p_win_max": diag.get("p_win_max", ""),
+            "p_win_min": diag.get("p_win_min", ""),
+            "EV_max": diag.get("EV_max", ""),
+            "prob_band_min": band["min"],
+            "prob_band_max": band["max"],
+            "dry_run": bool(args.dry_run),
+            "mode": paper["signal_mode"],
+        }
+
         if winner is None:
+            decision_row["decision"] = "NO"
+            decision_row["reason_no_signal"] = diag.get("reason_no_signal", "UNKNOWN")
+            try:
+                append_decision(cfg.logs_dir, decision_row)
+            except Exception as e:
+                log.warning("[%s] Could not append decision CSV: %s", tf, e)
             log.info("[%s] NO_SIGNAL: %s", tf, diag.get("reason_no_signal", "?"))
             continue
+
+        # Hay ganador. Rellenar campos del candidato en decision_row
+        decision_row["winner_side"] = winner["side"]
+        decision_row["winner_candidate_id"] = int(winner["candidate_id"])
+        decision_row["winner_p_win_calibrated"] = float(winner["p_win_calibrated"])
+        decision_row["winner_EV_pred"] = float(winner["EV_pred"])
+        decision_row["winner_tp_pct"] = float(winner["tp_pct"])
+        decision_row["winner_sl_pct"] = float(winner["sl_pct"])
+        decision_row["winner_tp_mult"] = float(winner["tp_mult"])
+        decision_row["winner_sl_mult"] = float(winner["sl_mult"])
+        decision_row["winner_H"] = int(winner["H"])
+        decision_row["winner_p_break_even"] = float(winner.get("p_break_even_calc", winner.get("p_break_even", float("nan"))))
+        decision_row["winner_edge_over_be"] = float(winner.get("edge_over_be", float("nan")))
 
         # 4d. Check no hay posicion abierta en esta cartera
         positions = paper_broker.load_open_positions(cfg.state_dir)
         open_in_tf = [p for p in positions.values() if p.get("timeframe") == tf]
         if open_in_tf and not paper["allow_cross_timeframe_positions"]:
+            decision_row["decision"] = "NO"
+            decision_row["reason_no_signal"] = "WALLET_BLOCKED_BY_OPEN_POSITION_CROSS_TF"
+            try: append_decision(cfg.logs_dir, decision_row)
+            except Exception as e: log.warning("CSV decision fail: %s", e)
             log.info("[%s] Already has %d open position(s). Skipping.",
                      tf, len(open_in_tf))
             continue
         if len(open_in_tf) >= paper.get("max_positions_per_wallet", 1):
+            decision_row["decision"] = "NO"
+            decision_row["reason_no_signal"] = "WALLET_AT_MAX_POSITIONS"
+            try: append_decision(cfg.logs_dir, decision_row)
+            except Exception as e: log.warning("CSV decision fail: %s", e)
             log.info("[%s] Wallet at max positions (%d). Skipping.",
                      tf, len(open_in_tf))
             continue
@@ -198,12 +255,21 @@ def run_tick(cfg, args) -> int:
         # 4e. Idempotencia
         signal_id = make_signal_id(args.symbol, tf, close_t,
                                      winner["side"], int(winner["candidate_id"]))
+        decision_row["signal_id"] = signal_id
         if paper_broker.is_signal_processed(cfg.state_dir, signal_id):
+            decision_row["decision"] = "NO"
+            decision_row["reason_no_signal"] = "SIGNAL_ALREADY_PROCESSED"
+            try: append_decision(cfg.logs_dir, decision_row)
+            except Exception as e: log.warning("CSV decision fail: %s", e)
             log.info("[%s] Signal already processed (signal_id=%s). Skipping.",
                      tf, signal_id)
             continue
 
         if paper["signal_mode"] == "preclose_preview":
+            decision_row["decision"] = "NO"
+            decision_row["reason_no_signal"] = "PREVIEW_MODE_NO_ENTRY"
+            try: append_decision(cfg.logs_dir, decision_row)
+            except Exception as e: log.warning("CSV decision fail: %s", e)
             log.info("[%s] PREVIEW MODE - signal saved but not opened: %s",
                      tf, signal_id)
             paper_broker.mark_signal_processed(cfg.state_dir, signal_id)
@@ -211,6 +277,10 @@ def run_tick(cfg, args) -> int:
 
         # 4f. Abrir operacion (paper)
         if args.dry_run:
+            decision_row["decision"] = "YES"  # se habria abierto
+            decision_row["reason_no_signal"] = "DRY_RUN_WOULD_OPEN"
+            try: append_decision(cfg.logs_dir, decision_row)
+            except Exception as e: log.warning("CSV decision fail: %s", e)
             log.info("[%s] DRY-RUN would open: %s p_win=%.4f EV=%.6f tp_pct=%.4f sl_pct=%.4f",
                      tf, winner["side"], winner["p_win_calibrated"],
                      winner["EV_pred"], winner["tp_pct"], winner["sl_pct"])
@@ -250,6 +320,13 @@ def run_tick(cfg, args) -> int:
         )
         wallet_mod.apply_position_open(wallet, pos["position_id"])
         wallet_mod.save(cfg.state_dir, wallet)
+
+        decision_row["decision"] = "YES"
+        decision_row["position_id"] = pos["position_id"]
+        decision_row["entry_price"] = entry_price
+        decision_row["entry_price_quality"] = entry_price_quality
+        try: append_decision(cfg.logs_dir, decision_row)
+        except Exception as e: log.warning("CSV decision fail: %s", e)
 
     # 5. Dashboard
     try:
