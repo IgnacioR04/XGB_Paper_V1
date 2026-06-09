@@ -1,0 +1,104 @@
+# ============================================================
+# Paper trading config - XGB_Paper_V1
+# ============================================================
+
+version: "paper_v1"
+mode: "paper"                       # paper | live (live no implementado)
+execution_market: "paper_synthetic"  # paper_synthetic | spot_long_only | futures
+
+# ---------------------------------------------------------------
+# Carteras independientes - 100 EUR cada una
+# ---------------------------------------------------------------
+wallets:
+  "15m":
+    initial_capital_eur: 100.0
+    enabled: true
+  "1h":
+    initial_capital_eur: 100.0
+    enabled: true
+  "4h":
+    initial_capital_eur: 100.0
+    enabled: true
+
+allow_cross_timeframe_positions: true
+max_positions_per_wallet: 1
+
+# ---------------------------------------------------------------
+# Bandas de probabilidad calibrada (p_win_isotonic)
+# Regla por defecto: min <= p_win < max  (cerrada por abajo, abierta arriba)
+# ---------------------------------------------------------------
+probability_bands:
+  "15m":
+    min: 0.65
+    max: 0.70
+  "1h":
+    min: 0.70
+    max: 0.75
+  "4h":
+    min: 0.65
+    max: 0.70
+
+# Si true: filtra solo por p_win >= min (banda abierta arriba)
+allow_above_band: false
+# Si true: rechaza candidatos con EV_pred <= 0 incluso si caen en la banda
+require_positive_ev: false
+
+# ---------------------------------------------------------------
+# Costes (round-trip)
+# ---------------------------------------------------------------
+costs:
+  fee_in: 0.0006
+  fee_out: 0.0006
+  total_round_trip: 0.0012
+
+# ---------------------------------------------------------------
+# Modo de senal
+# closed_candle_only: solo decidir sobre vela cerrada (default)
+# preclose_preview:   solo guarda preview, NO abre operaciones
+# ---------------------------------------------------------------
+signal_mode: "closed_candle_only"
+
+# Politica de seleccion de candidato dentro de cada timeframe
+selection_policy: "top_EV_per_timeframe"
+# Sides permitidos (paper_synthetic acepta ambos)
+allowed_sides: ["long", "short"]
+
+# ---------------------------------------------------------------
+# Scheduler (GitHub Actions cron */5)
+# ---------------------------------------------------------------
+scheduler:
+  run_every_minutes: 5
+  # Cuanto despues del cierre real de vela podemos confiar en que Binance
+  # tiene la vela disponible (segundos)
+  candle_close_delay_seconds:
+    "15m": 20
+    "1h": 30
+    "4h": 60
+  # Maximo retraso aceptable desde el cierre de vela para procesar
+  max_late_minutes:
+    "15m": 4
+    "1h": 8
+    "4h": 15
+
+# ---------------------------------------------------------------
+# Modo de features
+# live_recompute:           extractores + builders rebuild features (default)
+# latest_master_snapshot:   leer master_15m_latest.parquet (local/Colab)
+# ---------------------------------------------------------------
+feature_mode: "live_recompute"
+external_artifacts_path: ""   # opcional: ruta extra para artifacts pesados
+
+# ---------------------------------------------------------------
+# Politica de NaN en inferencia
+# require_all: rechaza inferencia si falta alguna feature critica
+# tolerate:    permite NaN, XGBoost lo maneja nativamente
+# ---------------------------------------------------------------
+feature_nan_policy: "tolerate"
+
+# ---------------------------------------------------------------
+# Stop conditions de seguridad (paper)
+# ---------------------------------------------------------------
+stop_conditions:
+  consecutive_losses_max: 10
+  daily_drawdown_max: -0.10
+  weekly_drawdown_max: -0.20

@@ -1,0 +1,88 @@
+# ============================================================
+# Live data sources for XGB_Paper_V1
+# ============================================================
+# Las APIs aqui listadas son TODAS PUBLICAS y sin api key, salvo FRED.
+# Para paper trading no necesitas claves de Binance.
+# ============================================================
+
+binance_spot:
+  base_url: "https://api.binance.com"
+  symbols:
+    primary: "BTCUSDT"
+    cross: ["ETHUSDT", "ETHBTC", "XRPUSDT", "XRPBTC"]
+  timeframes: ["15m", "1h", "4h"]
+  klines_limit_per_call: 1000
+  rolling_history_candles: 400      # cuantas velas mantener en memoria por TF
+  request_timeout_sec: 15
+
+binance_futures:
+  base_url: "https://fapi.binance.com"
+  symbols: ["BTCUSDT", "ETHUSDT"]
+  timeframes: ["15m", "1h", "4h"]
+  klines_limit_per_call: 1000
+  rolling_history_candles: 400
+  funding:
+    refresh_interval_hours: 8
+  request_timeout_sec: 15
+
+fear_greed:
+  url: "https://api.alternative.me/fng/?limit=180&format=json"
+  refresh_interval_hours: 6
+
+blockchain_com:
+  base_url: "https://api.blockchain.info/charts"
+  metrics:
+    - "hash-rate"
+    - "difficulty"
+    - "n-transactions"
+    - "n-unique-addresses"
+  refresh_interval_hours: 24
+
+cryptocompare:
+  base_url: "https://min-api.cryptocompare.com/data/v2/histoday"
+  coins: ["BTC", "ETH", "XRP", "BNB", "SOL", "DOGE", "ADA", "USDT", "USDC", "DAI"]
+  refresh_interval_hours: 24
+
+yahoo_macro:
+  tickers:
+    spx: "^GSPC"
+    ndx: "^IXIC"
+    rut: "^RUT"
+    vix: "^VIX"
+    move: "^MOVE"
+    nikkei: "^N225"
+    hangseng: "^HSI"
+    gold: "GC=F"
+    silver: "SI=F"
+    oil: "CL=F"
+    copper: "HG=F"
+  refresh_interval_hours: 1   # solo intenta cada hora; fuera de mercado US dara NaN
+
+fred:
+  base_url: "https://api.stlouisfed.org/fred/series/observations"
+  # Requiere FRED_API_KEY como secret
+  series:
+    dxy: "DTWEXBGS"
+    us_10y: "DGS10"
+    us_2y: "DGS2"
+    fed_funds: "FEDFUNDS"
+    m2: "M2SL"
+    cpi: "CPIAUCSL"
+  refresh_interval_hours: 24
+
+# Polica de cache: si una fuente externa falla, cuanto tiempo permitir
+# mantener el ultimo valor valido antes de marcar como STALE
+stale_thresholds_hours:
+  binance: 1
+  fear_greed: 36
+  blockchain_com: 48
+  cryptocompare: 48
+  yahoo_macro: 72         # los fines de semana sin datos son normales
+  fred: 168               # serie mensual puede tardar
+
+# Cuantas calls por minuto como tope local (proteccion contra rate limits)
+rate_limits:
+  binance_spot_per_min: 60
+  binance_futures_per_min: 60
+  yahoo_per_min: 20
+  cryptocompare_per_sec: 10

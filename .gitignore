@@ -1,0 +1,47 @@
+# ------- Python -------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# ------- Data en disco (estado runtime) -------
+data/live_raw/
+data/live_features/
+data/state/wallet_*.json
+data/state/open_positions.json
+data/state/processed_candles.json
+data/paper_trades/
+data/logs/
+
+# Pero conservar los placeholders del repo
+!data/state/.gitkeep
+!data/paper_trades/.gitkeep
+!data/logs/.gitkeep
+!data/live_raw/.gitkeep
+!data/live_features/.gitkeep
+
+# ------- Dashboard JSON regenerado en cada tick -------
+dashboard/data/*.json
+
+# ------- Secrets -------
+.env
+.env.local
+*.local.yaml
+
+# ------- IDE / OS -------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# ------- Notebooks check-pointing -------
+.ipynb_checkpoints/

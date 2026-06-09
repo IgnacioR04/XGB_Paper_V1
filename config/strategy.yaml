@@ -1,0 +1,47 @@
+# ============================================================
+# Strategy parameters - Approach B / barriers_v2 / top EV per TF
+# ============================================================
+
+model:
+  approach: "B"
+  model_filename: "approach_B_xgb_{tf}.json"     # en artifacts/models/
+  calibration_method: "isotonic"
+  calibration_filename: "calib_approach_B_compact.json"
+  models_dir: "artifacts/models"
+  calibration_dir: "artifacts/calibration"
+  schemas_dir: "artifacts/schemas"
+
+candidates:
+  library_filename: "barrier_candidate_library_{tf}.parquet"
+  library_dir: "artifacts/candidates"
+  # Top-K candidatos por (decile, side) en la libreria. Para inferencia live
+  # generamos un candidato por fila de la libreria filtrado por el decile real
+  top_k_per_decile_side: 5
+
+ev:
+  cost_round_trip: 0.0012
+  formula: "p_win_calibrated * tp_pct - (1.0 - p_win_calibrated) * sl_pct - cost_round_trip"
+
+# Mapeo de timeframe -> minutos
+timeframe_minutes:
+  "15m": 15
+  "1h": 60
+  "4h": 240
+
+# Vela de entrada y salida
+entry:
+  preferred: "open_t_plus_1"        # como en backtest
+  fallback: "current_ticker"
+  ticker_endpoint: "/api/v3/ticker/price?symbol=BTCUSDT"
+
+exit_reasons: ["TP", "SL", "TIMEOUT", "MANUAL", "ERROR"]
+intrabar_conflict_rule: "SL_first"   # conservador: si TP y SL en misma vela, gana SL
+
+# Volatility model usado para decile estimation
+# El modelo final guarda vol_pred en el master; en live lo recomputamos con
+# EWMA(20) sobre true_range para 15m y 1h, y proporcion ATR(14)/close para 4h.
+# Si en el futuro hay un modelo ML de vol, dropearlo aqui.
+volatility:
+  method: "ewma_true_range"
+  ewma_span: 20
+  decile_bounds_path: "artifacts/schemas/vol_decile_bounds.json"

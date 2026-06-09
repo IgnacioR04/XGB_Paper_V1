@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>XGB Paper Trader - Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>XGB Paper Trader</h1>
+  <p>Approach B - XGBoost label_win - calibracion isotonic</p>
+  <p id="generated-at" class="muted"></p>
+</header>
+
+<section id="summary-cards" class="grid-3"></section>
+
+<section class="grid-3">
+  <div class="card"><h3>Equity 15m</h3><canvas id="chart-15m"></canvas></div>
+  <div class="card"><h3>Equity 1h</h3><canvas id="chart-1h"></canvas></div>
+  <div class="card"><h3>Equity 4h</h3><canvas id="chart-4h"></canvas></div>
+</section>
+
+<section class="card">
+  <h3>Posiciones abiertas</h3>
+  <div id="open-positions"></div>
+</section>
+
+<section class="card">
+  <h3>Operaciones realizadas (ultimas 500)</h3>
+  <div id="trades-table"></div>
+</section>
+
+<script src="dashboard.js"></script>
+</body>
+</html>
