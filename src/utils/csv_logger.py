@@ -27,8 +27,10 @@ import pandas as pd
 DECISION_COLUMNS = [
     "tick_ts_utc",            # cuando corrio el tick
     "timeframe",
-    "candle_open_time",       # vela cerrada usada para inferencia
-    "candle_close_time",
+    "candle_open_time",       # apertura de la vela t (la CERRADA usada para inferencia)
+    "candle_close_time",      # cierre de t = momento de la pregunta al modelo
+    "execution_candle_open",  # apertura de t+1 = cuando se ejecuta la operacion
+                              # (= candle_close_time; t+1 abre cuando t cierra)
     "btc_close",              # precio BTC en esa vela
     "vol_pred",
     "vol_decile",

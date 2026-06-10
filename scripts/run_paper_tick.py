@@ -223,6 +223,8 @@ def run_tick(cfg, args) -> int:
             "timeframe": tf,
             "candle_open_time": candle_open.isoformat() if hasattr(candle_open, "isoformat") else str(candle_open),
             "candle_close_time": close_t.isoformat() if hasattr(close_t, "isoformat") else str(close_t),
+            # t+1 abre exactamente cuando t cierra:
+            "execution_candle_open": close_t.isoformat() if hasattr(close_t, "isoformat") else str(close_t),
             "btc_close": float(last_row.get("ohlcv_btc_close", float("nan"))),
             "vol_pred": vol_pred,
             "vol_decile": decile,
@@ -314,10 +316,10 @@ def run_tick(cfg, args) -> int:
                      winner["EV_pred"], winner["tp_pct"], winner["sl_pct"])
             continue
 
-        entry_price_quality = "ticker"
         ideal_entry = float(last_row["ohlcv_btc_close"])
         try:
-            entry_price = bspot.fetch_ticker_price(args.symbol)
+            entry_price, ticker_src = bspot.fetch_ticker_price_with_fallback(args.symbol)
+            entry_price_quality = f"ticker_{ticker_src}"
         except Exception as e:
             log.warning("[%s] Ticker failed, using last close: %s", tf, e)
             entry_price = ideal_entry

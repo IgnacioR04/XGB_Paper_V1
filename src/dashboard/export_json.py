@@ -18,6 +18,24 @@ def _safe_trades_df(trades_dir: Path) -> pd.DataFrame:
     return pd.read_parquet(p)
 
 
+def _signals_history_df(logs_dir: Path, max_rows: int = 2000) -> pd.DataFrame:
+    """Concatena todos los decisions_YYYY-MM.csv (historial de preguntas al
+    modelo con semantica t -> t+1)."""
+    decisions_dir = Path(logs_dir) / "decisions"
+    if not decisions_dir.exists():
+        return pd.DataFrame()
+    frames = []
+    for p in sorted(decisions_dir.glob("decisions_*.csv")):
+        try:
+            frames.append(pd.read_csv(p))
+        except Exception:
+            continue
+    if not frames:
+        return pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True, sort=False)
+    return df.tail(max_rows)
+
+
 def export_all(cfg) -> None:
     out = Path(cfg.dashboard_data_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -66,6 +84,24 @@ def export_all(cfg) -> None:
     # Open positions
     open_pos = list(paper_broker.load_open_positions(cfg.state_dir).values())
     write_json_atomic(out / "open_positions.json", {"open_positions": open_pos})
+
+    # Signals history (cada pregunta al modelo: vela t -> ejecucion en t+1)
+    sig_df = _signals_history_df(cfg.logs_dir)
+    signals = []
+    if not sig_df.empty:
+        keep = [c for c in (
+            "tick_ts_utc", "timeframe", "candle_open_time", "candle_close_time",
+            "execution_candle_open", "btc_close", "vol_pred", "vol_decile",
+            "n_candidates_initial", "n_in_band", "p_win_max", "EV_max",
+            "decision", "reason_no_signal", "winner_side",
+            "winner_p_win_calibrated", "winner_EV_pred", "winner_tp_pct",
+            "winner_sl_pct", "winner_H", "entry_price", "signal_id", "dry_run",
+        ) if c in sig_df.columns]
+        sub = sig_df[keep].copy()
+        # NaN -> None para JSON limpio
+        sub = sub.where(pd.notna(sub), None)
+        signals = sub.to_dict(orient="records")
+    write_json_atomic(out / "signals.json", {"signals": signals})
 
     # Summary
     summary = {

@@ -101,6 +101,37 @@ def fetch_ticker_price(symbol: str, timeout: int = 10) -> float:
     return float(data["price"])
 
 
+def coinbase_spot_price(symbol: str, timeout: int = 10) -> float | None:
+    """Precio spot actual via Coinbase. Solo BTCUSDT/ETHUSDT."""
+    pair_map = {"BTCUSDT": "BTC-USD", "ETHUSDT": "ETH-USD"}
+    if symbol not in pair_map:
+        return None
+    url = f"https://api.exchange.coinbase.com/products/{pair_map[symbol]}/ticker"
+    try:
+        r = requests.get(url, timeout=timeout,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        return float(r.json()["price"])
+    except Exception as e:
+        log.warning("Coinbase ticker failed for %s: %s", symbol, e)
+        return None
+
+
+def fetch_ticker_price_with_fallback(symbol: str,
+                                      timeout: int = 10) -> tuple[float, str]:
+    """Devuelve (price, source). source in {binance_spot, coinbase}.
+    Levanta RuntimeError si ambas fallan."""
+    try:
+        return fetch_ticker_price(symbol, timeout=timeout), "binance_spot"
+    except Exception as e:
+        log.warning("Binance ticker failed for %s: %s", symbol, e)
+    price = coinbase_spot_price(symbol, timeout=timeout)
+    if price is not None:
+        return price, "coinbase"
+    raise RuntimeError(f"No ticker source available for {symbol}")
+
+
 def fetch_last_n_closed(symbol: str, interval: str, n: int,
                         timeout: int = 15) -> pd.DataFrame:
     raw = fetch_klines(symbol, interval, limit=n + 1, timeout=timeout)

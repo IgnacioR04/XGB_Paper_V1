@@ -5,21 +5,50 @@
 <title>XGB Paper Trader - Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="styles.css" />
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <header>
-  <h1>XGB Paper Trader</h1>
-  <p>Approach B - XGBoost label_win - calibracion isotonic</p>
-  <p id="generated-at" class="muted"></p>
+  <div class="header-row">
+    <div>
+      <h1>XGB Paper Trader</h1>
+      <p>Approach B - XGBoost label_win - calibracion isotonic - bandas 15m/4h: 0.65-0.70, 1h: 0.70-0.75</p>
+      <p id="generated-at" class="muted"></p>
+    </div>
+    <div class="live-price">
+      <span class="muted">BTC/USDT</span>
+      <span id="live-price-value">--</span>
+      <span id="live-price-source" class="muted small"></span>
+    </div>
+  </div>
 </header>
 
 <section id="summary-cards" class="grid-3"></section>
 
+<section class="card">
+  <h3>Bitcoin en tiempo real (velas 1m)</h3>
+  <div id="chart-live" class="chart-big"></div>
+</section>
+
 <section class="grid-3">
-  <div class="card"><h3>Equity 15m</h3><canvas id="chart-15m"></canvas></div>
-  <div class="card"><h3>Equity 1h</h3><canvas id="chart-1h"></canvas></div>
-  <div class="card"><h3>Equity 4h</h3><canvas id="chart-4h"></canvas></div>
+  <div class="card">
+    <h3>Estrategia 15m <span class="muted small">(velas 15m + trades)</span></h3>
+    <div id="chart-tf-15m" class="chart-small"></div>
+  </div>
+  <div class="card">
+    <h3>Estrategia 1h <span class="muted small">(velas 1h + trades)</span></h3>
+    <div id="chart-tf-1h" class="chart-small"></div>
+  </div>
+  <div class="card">
+    <h3>Estrategia 4h <span class="muted small">(velas 4h + trades)</span></h3>
+    <div id="chart-tf-4h" class="chart-small"></div>
+  </div>
+</section>
+
+<section class="grid-3">
+  <div class="card"><h3>Equity 15m</h3><div id="chart-eq-15m" class="chart-eq"></div></div>
+  <div class="card"><h3>Equity 1h</h3><div id="chart-eq-1h" class="chart-eq"></div></div>
+  <div class="card"><h3>Equity 4h</h3><div id="chart-eq-4h" class="chart-eq"></div></div>
 </section>
 
 <section class="card">
@@ -28,7 +57,12 @@
 </section>
 
 <section class="card">
-  <h3>Operaciones realizadas (ultimas 500)</h3>
+  <h3>Historial de senales <span class="muted small">(en el cierre de la vela t se pregunta al modelo; si dice SI se opera en la apertura de t+1)</span></h3>
+  <div id="signals-table"></div>
+</section>
+
+<section class="card">
+  <h3>Operaciones realizadas</h3>
   <div id="trades-table"></div>
 </section>
 

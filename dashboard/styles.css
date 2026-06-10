@@ -47,4 +47,18 @@ td.timeout { color: var(--muted); }
 .table-wrap { overflow-x: auto; }
 .empty { color: var(--muted); font-style: italic; padding: 16px 0; }
 
-canvas { width: 100% !important; height: 240px !important; }
+.chart-big   { width: 100%; height: 380px; }
+.chart-small { width: 100%; height: 260px; }
+.chart-eq    { width: 100%; height: 180px; }
+
+.header-row { display: flex; justify-content: space-between; align-items: center;
+              flex-wrap: wrap; gap: 12px; }
+.live-price { display: flex; flex-direction: column; align-items: flex-end; }
+#live-price-value { font-size: 28px; font-weight: 700; }
+#live-price-value.green { color: var(--green); }
+#live-price-value.red   { color: var(--red); }
+.small { font-size: 11px; }
+.green { color: var(--green); }
+.red   { color: var(--red); }
+.row-yes { background: rgba(63, 185, 80, .08); }
+.kpi-value.small { font-size: 12px; }

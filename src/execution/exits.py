@@ -38,7 +38,13 @@ def monitor_and_close_positions(state_dir: Path, trades_dir: Path,
         key = (symbol, tf)
         if key not in klines_cache:
             try:
-                klines_cache[key] = bspot.fetch_last_n_closed(symbol, tf, n=64)
+                kdf, source = bspot.fetch_last_n_closed_with_fallback(symbol, tf, n=64)
+                if kdf.empty:
+                    log.warning("Empty klines for exit check %s %s (source=%s)",
+                                symbol, tf, source)
+                    klines_cache[key] = None
+                else:
+                    klines_cache[key] = kdf
             except Exception as e:
                 log.warning("Could not fetch klines for exit check %s %s: %s",
                             symbol, tf, e)
@@ -50,12 +56,19 @@ def monitor_and_close_positions(state_dir: Path, trades_dir: Path,
             exit_info = pm.find_exit_in_klines(pos, klines, intrabar_rule=intrabar_rule)
 
         if exit_info is None and pm.check_timeout(pos.get("timeout_time", ""), now):
-            # Salir a precio actual via ticker
+            # Salir a precio actual via ticker (con fallback Coinbase)
             try:
-                price = bspot.fetch_ticker_price(symbol)
+                price, _src = bspot.fetch_ticker_price_with_fallback(symbol)
             except Exception as e:
-                log.error("Timeout reached for %s but ticker failed: %s", pos_id, e)
-                continue
+                # Ultimo recurso: close de la ultima vela disponible
+                if klines is not None and not klines.empty:
+                    price = float(klines.iloc[-1]["close"])
+                    log.warning("Ticker failed for %s, using last close %.2f",
+                                pos_id, price)
+                else:
+                    log.error("Timeout reached for %s but no price source: %s",
+                              pos_id, e)
+                    continue
             exit_info = {"exit_reason": "TIMEOUT", "exit_price": price, "exit_time": now}
 
         if exit_info is None:
