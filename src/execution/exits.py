@@ -52,8 +52,50 @@ def monitor_and_close_positions(state_dir: Path, trades_dir: Path,
         klines = klines_cache[key]
 
         exit_info = None
+        # 1) Velas CERRADAS del timeframe de la posicion (igual que el backtest)
         if klines is not None and not klines.empty:
             exit_info = pm.find_exit_in_klines(pos, klines, intrabar_rule=intrabar_rule)
+
+        # 2) Toque intra-vela: las TP/SL son ordenes en reposo en un exchange
+        #    real, se ejecutan al tocar el precio aunque la vela del TF siga
+        #    en curso. Detectamos el toque con velas de 1m cerradas (cubre la
+        #    vela parcial actual con ~1 min de retraso). barriers_v2 etiqueto
+        #    con replay 1m, asi que esto es fiel al entrenamiento.
+        if exit_info is None:
+            key_1m = (symbol, "1m")
+            if key_1m not in klines_cache:
+                try:
+                    m1, _src = bspot.fetch_last_n_closed_with_fallback(symbol, "1m", n=20)
+                    klines_cache[key_1m] = m1 if not m1.empty else None
+                except Exception as e:
+                    log.warning("Could not fetch 1m klines for intrabar check: %s", e)
+                    klines_cache[key_1m] = None
+            m1 = klines_cache[key_1m]
+            if m1 is not None:
+                exit_info = pm.find_exit_in_klines(pos, m1, intrabar_rule=intrabar_rule)
+                if exit_info is not None:
+                    log.info("Intrabar (1m) exit detected for %s: %s",
+                             pos_id, exit_info["exit_reason"])
+
+        # 3) Ticker actual: cubre el ultimo minuto no cerrado
+        if exit_info is None:
+            try:
+                price, _src = bspot.fetch_ticker_price_with_fallback(symbol)
+                res = pm.check_exit_intrabar(
+                    pos["side"], pos["entry_price"],
+                    pos["tp_price"], pos["sl_price"],
+                    candle_high=price, candle_low=price,
+                    intrabar_rule=intrabar_rule,
+                )
+                if res is not None:
+                    reason, barrier_price = res
+                    exit_info = {"exit_reason": reason,
+                                 "exit_price": barrier_price,
+                                 "exit_time": now}
+                    log.info("Ticker exit detected for %s: %s @ %.2f",
+                             pos_id, reason, barrier_price)
+            except Exception as e:
+                log.warning("Ticker intrabar check failed for %s: %s", pos_id, e)
 
         if exit_info is None and pm.check_timeout(pos.get("timeout_time", ""), now):
             # Salir a precio actual via ticker (con fallback Coinbase)

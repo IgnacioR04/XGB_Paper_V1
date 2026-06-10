@@ -45,6 +45,26 @@ def test_no_hit():
     assert res is None
 
 
+def test_ticker_as_candle_long_tp():
+    # El monitor usa el ticker como vela puntual (high=low=price):
+    # precio actual por encima del TP -> se ejecuta la orden TP
+    res = check_exit_intrabar("long", 100.0, 102.0, 98.0,
+                               candle_high=102.5, candle_low=102.5)
+    assert res == ("TP", 102.0)
+
+
+def test_ticker_as_candle_short_sl():
+    res = check_exit_intrabar("short", 100.0, 98.0, 102.0,
+                               candle_high=102.3, candle_low=102.3)
+    assert res == ("SL", 102.0)
+
+
+def test_ticker_as_candle_no_hit():
+    res = check_exit_intrabar("long", 100.0, 102.0, 98.0,
+                               candle_high=100.5, candle_low=100.5)
+    assert res is None
+
+
 def test_pnl_long_winning():
     # +2% bruto, -0.12% coste = +1.88%
     pnl = pnl_eur("long", 100, 102, notional_eur=100, cost=0.0012)
