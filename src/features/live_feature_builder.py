@@ -68,13 +68,23 @@ def build_live_features(timeframe: str,
 
     log.info("Fetching spot klines (%s) for %d symbols...", timeframe, len(spot_syms))
     spot_dfs: dict[str, pd.DataFrame] = {}
+    source_per_symbol: dict[str, str] = {}
     for sym, pfx in zip(spot_syms, spot_prefixes):
         try:
-            kdf = bspot.fetch_last_n_closed(sym, timeframe, rolling_history)
-            spot_dfs[pfx] = _kline_to_ohlcv_prefix(kdf, pfx)
+            kdf, source = bspot.fetch_last_n_closed_with_fallback(
+                sym, timeframe, rolling_history,
+            )
+            source_per_symbol[sym] = source
+            if kdf.empty:
+                log.warning("Empty klines for %s %s (source=%s)", sym, timeframe, source)
+                spot_dfs[pfx] = pd.DataFrame()
+            else:
+                spot_dfs[pfx] = _kline_to_ohlcv_prefix(kdf, pfx)
         except Exception as e:
             log.warning("Failed spot %s %s: %s", sym, timeframe, e)
+            source_per_symbol[sym] = f"error: {e}"
             spot_dfs[pfx] = pd.DataFrame()
+    log.info("Spot sources: %s", source_per_symbol)
 
     # base = BTC spot (es el indice maestro)
     btc = spot_dfs["btc"]
