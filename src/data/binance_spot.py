@@ -142,54 +142,99 @@ def fetch_last_n_closed(symbol: str, interval: str, n: int,
 
 # ---------------------------------------------------------------------------
 # Fallback: Coinbase (solo BTC, ETH). Sus klines tienen otro formato.
+# Limitaciones de Coinbase Exchange API:
+#   - max 300 velas por request (paginamos con start/end)
+#   - granularity solo en {60, 300, 900, 3600, 21600, 86400};
+#     4h NO existe -> bajamos 1h y resampleamos a 4h alineado UTC.
 # ---------------------------------------------------------------------------
 
-COINBASE_INTERVAL_SEC = {"15m": 900, "1h": 3600, "4h": 14400}
+COINBASE_GRANULARITY = {"1m": 60, "15m": 900, "1h": 3600}
+
+
+def _coinbase_candles_paginated(pair: str, granularity: int, n: int) -> list:
+    """Devuelve hasta n velas [time, low, high, open, close, vol] ASC."""
+    url = f"https://api.exchange.coinbase.com/products/{pair}/candles"
+    collected: dict[int, list] = {}
+    end = dt.datetime.now(dt.timezone.utc)
+    for _ in range(10):  # max 10 paginas de 300
+        if len(collected) >= n:
+            break
+        start = end - dt.timedelta(seconds=granularity * 300)
+        try:
+            r = requests.get(url, params={
+                "granularity": granularity,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            }, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200:
+                log.warning("Coinbase HTTP %d for %s gran=%d",
+                            r.status_code, pair, granularity)
+                break
+            rows = r.json()
+        except Exception as e:
+            log.warning("Coinbase request failed for %s: %s", pair, e)
+            break
+        if not rows:
+            break
+        for row in rows:
+            if row and len(row) >= 6:
+                collected[int(row[0])] = row
+        oldest = min(int(row[0]) for row in rows if row)
+        end = dt.datetime.fromtimestamp(oldest, dt.timezone.utc)
+    return [collected[t] for t in sorted(collected)][-n:]
+
+
+def _coinbase_rows_to_df(rows: list, gran: int) -> pd.DataFrame:
+    out = []
+    for ts, low, high, open_, close, vol in rows:
+        out.append({
+            "open_time": pd.Timestamp(int(ts), unit="s", tz="UTC"),
+            "open": float(open_), "high": float(high), "low": float(low),
+            "close": float(close), "volume": float(vol),
+            "close_time": pd.Timestamp(int(ts) + gran - 1, unit="s", tz="UTC"),
+            "quote_volume": float(vol) * float(close),
+            "num_trades": 0, "taker_buy_vol": 0.0, "taker_buy_qvol": 0.0,
+        })
+    return pd.DataFrame(out)
+
+
+def _resample_1h_to_4h(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrega velas 1h en bloques 4h alineados a UTC 00/04/08/12/16/20."""
+    if df.empty:
+        return df
+    df = df.set_index("open_time").sort_index()
+    agg = df.resample("4h", origin="epoch").agg({
+        "open": "first", "high": "max", "low": "min", "close": "last",
+        "volume": "sum", "quote_volume": "sum",
+        "num_trades": "sum", "taker_buy_vol": "sum", "taker_buy_qvol": "sum",
+    }).dropna(subset=["open"])
+    agg["close_time"] = agg.index + pd.Timedelta(hours=4) - pd.Timedelta(seconds=1)
+    # Descartar el bloque 4h aun en curso (incompleto: menos de 4 velas 1h)
+    counts = df["close"].resample("4h", origin="epoch").count()
+    agg = agg[counts >= 4]
+    return agg.reset_index()
 
 
 def coinbase_fallback_klines(symbol: str, interval: str, n: int) -> pd.DataFrame:
     """Convierte BTCUSDT -> BTC-USD, ETHUSDT -> ETH-USD.
 
-    Devuelve el mismo formato que fetch_klines (sin trades/taker). Las
-    columnas que no existen en Coinbase quedan en 0/NaN.
+    Mismo formato que fetch_klines (num_trades/taker_* en 0).
     """
     pair_map = {"BTCUSDT": "BTC-USD", "ETHUSDT": "ETH-USD"}
     if symbol not in pair_map:
         return pd.DataFrame()
     pair = pair_map[symbol]
-    gran = COINBASE_INTERVAL_SEC[interval]
-    url = f"https://api.exchange.coinbase.com/products/{pair}/candles"
-    try:
-        r = requests.get(url, params={"granularity": gran},
-                         timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code != 200:
-            log.warning("Coinbase fallback HTTP %d for %s", r.status_code, pair)
-            return pd.DataFrame()
-        data = r.json()
-    except Exception as e:
-        log.warning("Coinbase fallback failed for %s: %s", pair, e)
-        return pd.DataFrame()
 
-    # Coinbase: [time, low, high, open, close, volume]
-    rows = []
-    for entry in data:
-        if not entry or len(entry) < 6:
-            continue
-        ts, low, high, open_, close, vol = entry
-        rows.append({
-            "open_time": pd.Timestamp(ts, unit="s", tz="UTC"),
-            "open": float(open_),
-            "high": float(high),
-            "low": float(low),
-            "close": float(close),
-            "volume": float(vol),
-            "close_time": pd.Timestamp(ts + gran - 1, unit="s", tz="UTC"),
-            "quote_volume": float(vol) * float(close),
-            "num_trades": 0,
-            "taker_buy_vol": 0.0,
-            "taker_buy_qvol": 0.0,
-        })
-    df = pd.DataFrame(rows).sort_values("open_time").reset_index(drop=True)
+    if interval == "4h":
+        rows = _coinbase_candles_paginated(pair, 3600, n * 4 + 8)
+        df1h = _coinbase_rows_to_df(rows, 3600)
+        return _resample_1h_to_4h(df1h).tail(n + 1).reset_index(drop=True)
+
+    gran = COINBASE_GRANULARITY.get(interval)
+    if gran is None:
+        return pd.DataFrame()
+    rows = _coinbase_candles_paginated(pair, gran, n + 2)
+    df = _coinbase_rows_to_df(rows, gran)
     return df.tail(n + 1).reset_index(drop=True)
 
 

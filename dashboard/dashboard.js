@@ -52,14 +52,30 @@ async function fetchKlinesBinance(interval, limit) {
 }
 
 async function fetchKlinesCoinbase(interval, limit) {
-  const gran = TF_SECONDS[interval];
+  // Coinbase no soporta granularity 4h: bajar 1h y agregar en bloques de 4.
+  const gran = interval === "4h" ? 3600 : TF_SECONDS[interval];
   const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error("coinbase " + r.status);
   const raw = await r.json();   // [[time, low, high, open, close, vol], ...] DESC
-  return raw.reverse().slice(-limit).map(k => ({
+  let candles = raw.reverse().map(k => ({
     time: k[0], open: k[3], high: k[2], low: k[1], close: k[4],
   }));
+  if (interval === "4h") {
+    const buckets = new Map();
+    for (const c of candles) {
+      const b = Math.floor(c.time / 14400) * 14400;
+      const cur = buckets.get(b);
+      if (!cur) buckets.set(b, { time: b, open: c.open, high: c.high, low: c.low, close: c.close });
+      else {
+        cur.high = Math.max(cur.high, c.high);
+        cur.low = Math.min(cur.low, c.low);
+        cur.close = c.close;
+      }
+    }
+    candles = [...buckets.values()].sort((a, b) => a.time - b.time);
+  }
+  return candles.slice(-limit);
 }
 
 let klineSource = "binance";
