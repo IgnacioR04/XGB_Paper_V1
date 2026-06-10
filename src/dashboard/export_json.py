@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +10,21 @@ import pandas as pd
 from ..execution import paper_broker
 from ..portfolio import wallet as wallet_mod
 from ..utils.io import read_json, write_json_atomic
+
+
+def _json_safe(records: list[dict]) -> list[dict]:
+    """NaN/inf -> None. json.dump escribe el literal NaN (invalido para
+    JSON.parse del navegador) si no se limpia antes."""
+    out = []
+    for r in records:
+        clean = {}
+        for k, v in r.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                clean[k] = None
+            else:
+                clean[k] = v
+        out.append(clean)
+    return out
 
 
 def _safe_trades_df(trades_dir: Path) -> pd.DataFrame:
@@ -77,8 +93,8 @@ def export_all(cfg) -> None:
             "candidate_id", "vol_decile", "pnl_eur", "pnl_pct",
             "wallet_equity_after",
         ) if c in tdf.columns]
-        trades = tdf[keep_cols].sort_values("exit_time", ascending=False) \
-            .head(500).to_dict(orient="records")
+        trades = _json_safe(tdf[keep_cols].sort_values("exit_time", ascending=False)
+                            .head(500).to_dict(orient="records"))
     write_json_atomic(out / "trades.json", {"trades": trades})
 
     # Open positions
@@ -98,9 +114,7 @@ def export_all(cfg) -> None:
             "winner_sl_pct", "winner_H", "entry_price", "signal_id", "dry_run",
         ) if c in sig_df.columns]
         sub = sig_df[keep].copy()
-        # NaN -> None para JSON limpio
-        sub = sub.where(pd.notna(sub), None)
-        signals = sub.to_dict(orient="records")
+        signals = _json_safe(sub.to_dict(orient="records"))
     write_json_atomic(out / "signals.json", {"signals": signals})
 
     # Summary
