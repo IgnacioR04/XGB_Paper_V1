@@ -27,7 +27,7 @@ def _signals_history_df(logs_dir: Path, max_rows: int = 2000) -> pd.DataFrame:
     frames = []
     for p in sorted(decisions_dir.glob("decisions_*.csv")):
         try:
-            frames.append(pd.read_csv(p))
+            frames.append(pd.read_csv(p, on_bad_lines="skip"))
         except Exception:
             continue
     if not frames:

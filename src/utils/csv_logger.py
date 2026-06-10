@@ -80,8 +80,24 @@ def append_decision(logs_dir: Path, row: dict[str, Any]) -> Path:
     # Garantizar todas las columnas
     full = {c: row.get(c, "") for c in DECISION_COLUMNS}
     df = pd.DataFrame([full], columns=DECISION_COLUMNS)
-    header = not p.exists()
-    df.to_csv(p, mode="a", header=header, index=False)
+
+    if not p.exists():
+        df.to_csv(p, index=False)
+        return p
+
+    # Schema evolution: si el CSV existente tiene otras columnas (p.ej. una
+    # version anterior del codigo), reescribir con la union para no
+    # desalinear filas.
+    existing_cols = pd.read_csv(p, nrows=0).columns.tolist()
+    if existing_cols == DECISION_COLUMNS:
+        df.to_csv(p, mode="a", header=False, index=False)
+    else:
+        old = pd.read_csv(p)
+        for c in DECISION_COLUMNS:
+            if c not in old.columns:
+                old[c] = ""
+        combined = pd.concat([old[DECISION_COLUMNS], df], ignore_index=True)
+        combined.to_csv(p, index=False)
     return p
 
 
