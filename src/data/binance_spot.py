@@ -179,7 +179,11 @@ def fetch_last_n_closed_with_fallback(symbol: str, interval: str, n: int,
     # Fallback
     df = coinbase_fallback_klines(symbol, interval, n)
     if not df.empty:
-        now = pd.Timestamp.utcnow().tz_localize("UTC")
+        # pd.Timestamp.utcnow() en pandas >=3.0 ya devuelve tz-aware;
+        # en versiones anteriores devuelve naive. Normalizamos:
+        now = pd.Timestamp.utcnow()
+        if now.tzinfo is None:
+            now = now.tz_localize("UTC")
         df = df[df["close_time"] <= now].tail(n).reset_index(drop=True)
         if not df.empty:
             log.warning("Using Coinbase fallback for %s %s", symbol, interval)
