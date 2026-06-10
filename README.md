@@ -26,6 +26,34 @@ Cada 5 minutos (cron de GitHub Actions) el bot:
 Cada timeframe tiene su PROPIA cartera de **100 EUR**. Las carteras son
 independientes y un trade en `15m` no afecta a `1h` ni `4h`.
 
+## Semantica temporal: vela t -> ejecucion en t+1
+
+El estandar profesional (y el que uso el backtest de entrenamiento):
+
+```
+|---- vela t ----|---- vela t+1 ----|
+                 ^
+                 cierre de t = apertura de t+1
+                 AQUI se pregunta al modelo (features = vela t CERRADA)
+                 y AQUI MISMO se ejecuta la entrada (apertura de t+1)
+```
+
+- En velas de 15m: la vela 11:30-11:45 cierra a las 11:45. En ese momento
+  el bot construye las features con esa vela cerrada, pregunta al modelo, y
+  si pasa los filtros entra a precio de mercado al inicio de la vela
+  11:45-12:00 (unos segundos despues de las 11:45).
+- Igual para 1h (al cierre de cada hora) y 4h (al cierre de cada bloque de
+  4h UTC: 00, 04, 08, 12, 16, 20).
+
+**Nunca se decide con la vela en curso** (`signal_mode: closed_candle_only`).
+
+Cada pregunta al modelo queda registrada en
+`data/logs/decisions/decisions_YYYY-MM.csv` con columnas explicitas:
+`candle_open_time` (apertura de t), `candle_close_time` (cierre de t =
+momento de la pregunta), `execution_candle_open` (apertura de t+1 =
+momento de ejecucion), `decision` (YES/NO), motivo, y datos del candidato
+elegido si fue YES. El dashboard la muestra en "Historial de senales".
+
 ## Bandas de probabilidad por timeframe
 
 | TF  | Banda `p_win_calibrated` |
@@ -114,13 +142,23 @@ python scripts/run_paper_tick.py --force-tf 15m,1h
 
 ## Ver el dashboard
 
-Local: abrir `dashboard/index.html` en el navegador despues de correr al
-menos un tick (genera los JSONs en `dashboard/data/`).
+URL: `https://ignacior04.github.io/XGB_Paper_V1/` (GitHub Pages, se
+redespliega tras cada tick exitoso).
 
-En produccion: el workflow `pages.yml` lo publica en GitHub Pages tras cada
-tick exitoso. URL: `https://<usuario>.github.io/XGB_Paper_V1/`.
+Que muestra:
+- **Grafica de BTC en tiempo real** (velas 1m, refresco cada 5s). Las velas
+  se piden desde TU navegador a Binance (tu IP no esta bloqueada); si
+  fallara, cae a Coinbase automaticamente.
+- **Una grafica por estrategia** (15m / 1h / 4h) con varitas de su
+  timeframe y marcadores de trades: triangulo verde hacia arriba bajo la
+  vela = entrada long; triangulo rojo hacia abajo sobre la vela = entrada
+  short; circulo = salida con su PnL.
+- **Equity** por cartera.
+- **Historial de senales**: cada pregunta al modelo (la fila verde = abrio).
+- **Posiciones abiertas** y **trades cerrados**.
 
-Para activar Pages: Settings -> Pages -> Source = "GitHub Actions".
+Local: abrir `dashboard/index.html` con un servidor estatico
+(`python -m http.server` en la carpeta dashboard/) tras correr un tick.
 
 ## Modelo y artifacts
 
