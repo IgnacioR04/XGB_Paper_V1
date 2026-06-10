@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>XGB Paper Trader - Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="styles.css" />
+<script>document.write('<link rel="stylesheet" href="styles.css?v=' + Date.now() + '" />');</script>
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -19,6 +19,7 @@
       <span class="muted">BTC/USDT</span>
       <span id="live-price-value">--</span>
       <span id="live-price-source" class="muted small"></span>
+      <span id="local-tz-label" class="muted small"></span>
     </div>
   </div>
 </header>
@@ -26,8 +27,27 @@
 <section id="summary-cards" class="grid-3"></section>
 
 <section class="card">
-  <h3>Bitcoin en tiempo real (velas 1m)</h3>
+  <div class="card-header">
+    <h3>Bitcoin en tiempo real</h3>
+    <div id="live-tf-buttons" class="tf-buttons">
+      <button data-tf="1m" class="tf-btn">1m</button>
+      <button data-tf="5m" class="tf-btn">5m</button>
+      <button data-tf="15m" class="tf-btn active">15m</button>
+      <button data-tf="1h" class="tf-btn">1h</button>
+      <button data-tf="4h" class="tf-btn">4h</button>
+      <button data-tf="1d" class="tf-btn">1d</button>
+    </div>
+  </div>
   <div id="chart-live" class="chart-big"></div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h3>Libro de ordenes (depth)</h3>
+    <div class="muted small">Bids verdes vs Asks rojos - hasta 1000 niveles - refresco 5s</div>
+  </div>
+  <div id="chart-depth" class="chart-depth"></div>
+  <div id="depth-stats" class="depth-stats"></div>
 </section>
 
 <section class="grid-3">
@@ -60,15 +80,45 @@
 </section>
 
 <section class="card">
-  <h3>Historial de senales <span class="muted small">(en el cierre de la vela t se pregunta al modelo; si dice SI se opera en la apertura de t+1)</span></h3>
-  <div id="signals-table"></div>
-</section>
-
-<section class="card">
-  <h3>Operaciones realizadas</h3>
+  <div class="card-header">
+    <h3>Operaciones realizadas</h3>
+    <div class="toolbar">
+      <div class="tf-buttons" data-target="trades">
+        <button data-tf="all" class="tf-btn active">Todas</button>
+        <button data-tf="15m" class="tf-btn">15m</button>
+        <button data-tf="1h" class="tf-btn">1h</button>
+        <button data-tf="4h" class="tf-btn">4h</button>
+      </div>
+      <div class="pager" data-target="trades">
+        <span class="pager-info"></span>
+        <button class="pager-prev">&larr;</button>
+        <button class="pager-next">&rarr;</button>
+      </div>
+    </div>
+  </div>
   <div id="trades-table"></div>
 </section>
 
-<script src="dashboard.js"></script>
+<section class="card">
+  <div class="card-header">
+    <h3>Historial de senales <span class="muted small">(en el cierre de la vela t se pregunta al modelo; si dice SI se opera en la apertura de t+1)</span></h3>
+    <div class="toolbar">
+      <div class="tf-buttons" data-target="signals">
+        <button data-tf="all" class="tf-btn active">Todas</button>
+        <button data-tf="15m" class="tf-btn">15m</button>
+        <button data-tf="1h" class="tf-btn">1h</button>
+        <button data-tf="4h" class="tf-btn">4h</button>
+      </div>
+      <div class="pager" data-target="signals">
+        <span class="pager-info"></span>
+        <button class="pager-prev">&larr;</button>
+        <button class="pager-next">&rarr;</button>
+      </div>
+    </div>
+  </div>
+  <div id="signals-table"></div>
+</section>
+
+<script>document.write('<script src="dashboard.js?v=' + Date.now() + '"><\/script>');</script>
 </body>
 </html>

@@ -1,27 +1,41 @@
-// Dashboard XGB Paper Trader.
-// - Velas en vivo: el NAVEGADOR pide klines a Binance (la IP del usuario no
-//   esta geo-bloqueada). Si falla, fallback a Coinbase.
-// - Estado del bot (wallets, trades, senales): JSONs generados por el bot
-//   en ./data/*.json (commiteados por GitHub Actions en cada tick).
+// Dashboard XGB Paper Trader v3
+// - Velas en vivo con selector de timeframe
+// - Order book depth chart (Binance public)
+// - Tablas paginadas + filtradas por timeframe
 
 const TFS = ["15m", "1h", "4h"];
-const TF_SECONDS = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400 };
+const TF_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
 
 const COLORS = {
   up: "#3fb950", down: "#f85149",
   grid: "#232936", text: "#8a93a6",
   line: "#58a6ff", area: "rgba(88,166,255,.12)",
+  bid: "#3fb950", bidArea: "rgba(63,185,80,.25)",
+  ask: "#f85149", askArea: "rgba(248,81,73,.25)",
 };
+
+const PAGE_SIZE = 25;
+const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// ---------------------------------------------------------------------------
+// Formateo de tiempo en hora LOCAL del usuario (no UTC)
+// ---------------------------------------------------------------------------
 
 const fmtEur = v => (v == null || Number.isNaN(+v)) ? "-" : (+v).toFixed(2) + " EUR";
 const fmtPct = v => (v == null || Number.isNaN(+v)) ? "-" : (+v * 100).toFixed(2) + " %";
 const fmtP   = v => (v == null || v === "" || Number.isNaN(+v)) ? "-" : (+v).toFixed(4);
 const fmtPrice = v => (v == null || v === "" || Number.isNaN(+v)) ? "-" : (+v).toLocaleString("en-US", {maximumFractionDigits: 2});
+
+const _timeFormatter = new Intl.DateTimeFormat("es-ES", {
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit",
+  hour12: false,
+});
 const fmtTime = v => {
   if (!v) return "-";
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
-  return d.toISOString().replace("T", " ").slice(0, 16);
+  return _timeFormatter.format(d).replace(",", "");
 };
 const toUnix = v => {
   const d = new Date(v);
@@ -52,12 +66,11 @@ async function fetchKlinesBinance(interval, limit) {
 }
 
 async function fetchKlinesCoinbase(interval, limit) {
-  // Coinbase no soporta granularity 4h: bajar 1h y agregar en bloques de 4.
   const gran = interval === "4h" ? 3600 : TF_SECONDS[interval];
   const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error("coinbase " + r.status);
-  const raw = await r.json();   // [[time, low, high, open, close, vol], ...] DESC
+  const raw = await r.json();
   let candles = raw.reverse().map(k => ({
     time: k[0], open: k[3], high: k[2], low: k[1], close: k[4],
   }));
@@ -85,11 +98,176 @@ async function fetchKlines(interval, limit) {
     catch { klineSource = "coinbase"; }
   }
   try { return await fetchKlinesCoinbase(interval, limit); }
-  catch (e) {
-    // reintentar binance la proxima vez
-    klineSource = "binance";
-    throw e;
+  catch (e) { klineSource = "binance"; throw e; }
+}
+
+// ---------------------------------------------------------------------------
+// Order book depth chart (libro de ordenes en vivo)
+// ---------------------------------------------------------------------------
+
+async function fetchOrderBook() {
+  const url = "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=1000";
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch {
+    // Coinbase product book (level 2)
+    try {
+      const r = await fetch("https://api.exchange.coinbase.com/products/BTC-USD/book?level=2");
+      if (!r.ok) throw new Error(r.status);
+      const d = await r.json();
+      return {
+        bids: (d.bids || []).map(b => [b[0], b[1]]),
+        asks: (d.asks || []).map(a => [a[0], a[1]]),
+      };
+    } catch { return null; }
   }
+}
+
+function buildCumulativeDepth(book) {
+  if (!book || !book.bids || !book.asks) return { bids: [], asks: [], mid: null };
+  // Bids ya vienen DESC por precio; asks ASC.
+  const bids = book.bids.map(b => [+b[0], +b[1]]).sort((a, b) => b[0] - a[0]);
+  const asks = book.asks.map(a => [+a[0], +a[1]]).sort((a, b) => a[0] - b[0]);
+  const mid = (bids[0][0] + asks[0][0]) / 2;
+
+  // Limitar a +/- 1% del mid para que el chart sea legible
+  const minP = mid * 0.99, maxP = mid * 1.01;
+
+  const bidPts = [];
+  let cum = 0;
+  for (const [p, q] of bids) {
+    if (p < minP) break;
+    cum += q;
+    bidPts.push({ price: p, cum });
+  }
+  bidPts.reverse(); // ASC en precio para el chart
+
+  const askPts = [];
+  cum = 0;
+  for (const [p, q] of asks) {
+    if (p > maxP) break;
+    cum += q;
+    askPts.push({ price: p, cum });
+  }
+
+  return { bids: bidPts, asks: askPts, mid, minP, maxP };
+}
+
+let depthChart = null;
+let depthBidSeries = null;
+let depthAskSeries = null;
+
+function initDepthChart() {
+  const el = document.getElementById("chart-depth");
+  // No usamos lightweight-charts aqui porque el eje X seria precio, no tiempo.
+  // Implementamos un canvas propio simple.
+  el.innerHTML = '<canvas id="depth-canvas"></canvas>';
+}
+
+function renderDepth(depth) {
+  const canvas = document.getElementById("depth-canvas");
+  if (!canvas || !depth || !depth.mid) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight || 280;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const allPts = [...depth.bids, ...depth.asks];
+  if (allPts.length === 0) return;
+  const maxCum = Math.max(...allPts.map(p => p.cum));
+  const minP = depth.minP, maxP = depth.maxP;
+
+  const x = p => ((p - minP) / (maxP - minP)) * w;
+  const y = c => h - (c / maxCum) * (h - 24) - 12;
+
+  // Grid horizontal
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const yy = (h / 4) * i;
+    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(w, yy); ctx.stroke();
+  }
+
+  // Bids (verde, lado izquierdo)
+  if (depth.bids.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(x(depth.bids[0].price), h);
+    for (const p of depth.bids) ctx.lineTo(x(p.price), y(p.cum));
+    ctx.lineTo(x(depth.bids[depth.bids.length - 1].price), h);
+    ctx.closePath();
+    ctx.fillStyle = COLORS.bidArea;
+    ctx.fill();
+    ctx.strokeStyle = COLORS.bid;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x(depth.bids[0].price), y(depth.bids[0].cum));
+    for (const p of depth.bids) ctx.lineTo(x(p.price), y(p.cum));
+    ctx.stroke();
+  }
+  // Asks (rojo, lado derecho)
+  if (depth.asks.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(x(depth.asks[0].price), h);
+    for (const p of depth.asks) ctx.lineTo(x(p.price), y(p.cum));
+    ctx.lineTo(x(depth.asks[depth.asks.length - 1].price), h);
+    ctx.closePath();
+    ctx.fillStyle = COLORS.askArea;
+    ctx.fill();
+    ctx.strokeStyle = COLORS.ask;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x(depth.asks[0].price), y(depth.asks[0].cum));
+    for (const p of depth.asks) ctx.lineTo(x(p.price), y(p.cum));
+    ctx.stroke();
+  }
+  // Linea del mid
+  ctx.strokeStyle = COLORS.text;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(x(depth.mid), 4);
+  ctx.lineTo(x(depth.mid), h - 4);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Etiquetas de precio
+  ctx.fillStyle = COLORS.text;
+  ctx.font = "11px ui-sans-serif, system-ui";
+  ctx.textAlign = "left";
+  ctx.fillText(fmtPrice(minP), 4, h - 4);
+  ctx.textAlign = "center";
+  ctx.fillText("mid " + fmtPrice(depth.mid), x(depth.mid), 14);
+  ctx.textAlign = "right";
+  ctx.fillText(fmtPrice(maxP), w - 4, h - 4);
+}
+
+async function refreshDepth() {
+  const book = await fetchOrderBook();
+  if (!book) return;
+  const depth = buildCumulativeDepth(book);
+  renderDepth(depth);
+
+  // Stats: bid/ask totales, imbalance
+  const totalBid = depth.bids.reduce((a, b) => a + b.cum, 0) / depth.bids.length || 0;
+  const totalAsk = depth.asks.reduce((a, b) => a + b.cum, 0) / depth.asks.length || 0;
+  const top = (arr, n) => arr.slice(-n).reduce((a, b) => a + b.cum, 0);
+  const bidWall = depth.bids.length ? depth.bids[0].cum : 0;
+  const askWall = depth.asks.length ? depth.asks[depth.asks.length - 1].cum : 0;
+  const imbalance = bidWall + askWall > 0 ? (bidWall - askWall) / (bidWall + askWall) : 0;
+  const imbCls = imbalance >= 0 ? "green" : "red";
+
+  document.getElementById("depth-stats").innerHTML = `
+    <div><span class="muted">Mid</span> <b>${fmtPrice(depth.mid)}</b></div>
+    <div><span class="muted">Best bid</span> <b class="green">${fmtPrice(depth.bids.length ? depth.bids[depth.bids.length-1].price : null)}</b></div>
+    <div><span class="muted">Best ask</span> <b class="red">${fmtPrice(depth.asks.length ? depth.asks[0].price : null)}</b></div>
+    <div><span class="muted">Liquidez bid (+/-1%)</span> <b class="green">${bidWall.toFixed(2)} BTC</b></div>
+    <div><span class="muted">Liquidez ask (+/-1%)</span> <b class="red">${askWall.toFixed(2)} BTC</b></div>
+    <div><span class="muted">Imbalance</span> <b class="${imbCls}">${(imbalance*100).toFixed(1)}%</b></div>
+  `;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +282,12 @@ const baseChartOptions = (h) => ({
   rightPriceScale: { borderColor: COLORS.grid },
   crosshair: { mode: 0 },
   autoSize: true,
+  localization: {
+    timeFormatter: ts => {
+      const d = new Date(ts * 1000);
+      return _timeFormatter.format(d).replace(",", "");
+    },
+  },
 });
 
 function makeCandleChart(containerId, height) {
@@ -126,11 +310,6 @@ function makeLineChart(containerId, height) {
   });
   return { chart, series };
 }
-
-// ---------------------------------------------------------------------------
-// Markers de trades: triangulo verde (arrowUp) = entrada long,
-// triangulo rojo invertido (arrowDown) = entrada short, circulo = salida.
-// ---------------------------------------------------------------------------
 
 function buildMarkers(tf, trades, openPositions) {
   const markers = [];
@@ -169,7 +348,7 @@ function buildMarkers(tf, trades, openPositions) {
 }
 
 // ---------------------------------------------------------------------------
-// Render de tablas y cards
+// Render summary cards y posiciones abiertas
 // ---------------------------------------------------------------------------
 
 function renderSummary(summary) {
@@ -219,11 +398,47 @@ function renderOpenPositions(data) {
   root.innerHTML = html + "</tbody></table></div>";
 }
 
-function renderSignals(data) {
+// ---------------------------------------------------------------------------
+// Estado de filtros + paginacion (signals/trades)
+// ---------------------------------------------------------------------------
+
+const tableState = {
+  signals: { all: [], filter: "all", page: 0 },
+  trades:  { all: [], filter: "all", page: 0 },
+};
+
+function filterRows(rows, filter) {
+  if (filter === "all") return rows;
+  return rows.filter(r => r.timeframe === filter);
+}
+
+function pageSlice(rows, page) {
+  const start = page * PAGE_SIZE;
+  return rows.slice(start, start + PAGE_SIZE);
+}
+
+function updatePager(target, total) {
+  const st = tableState[target];
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (st.page >= totalPages) st.page = totalPages - 1;
+  const root = document.querySelector(`.pager[data-target="${target}"]`);
+  if (!root) return;
+  root.querySelector(".pager-info").textContent =
+    total === 0 ? "0 filas" :
+    `${st.page * PAGE_SIZE + 1}-${Math.min(total, (st.page + 1) * PAGE_SIZE)} de ${total}`;
+  root.querySelector(".pager-prev").disabled = st.page <= 0;
+  root.querySelector(".pager-next").disabled = st.page >= totalPages - 1;
+}
+
+function renderSignalsTable() {
+  const st = tableState.signals;
   const root = document.getElementById("signals-table");
-  const signals = (data.signals || []).slice().reverse().slice(0, 100);
-  if (signals.length === 0) {
-    root.innerHTML = '<div class="empty">Sin senales registradas aun.</div>';
+  const filtered = filterRows(st.all, st.filter)
+    .slice().sort((a, b) => String(b.tick_ts_utc).localeCompare(String(a.tick_ts_utc)));
+  updatePager("signals", filtered.length);
+  const slice = pageSlice(filtered, st.page);
+  if (slice.length === 0) {
+    root.innerHTML = '<div class="empty">Sin senales en esta vista.</div>';
     return;
   }
   let html = '<div class="table-wrap"><table><thead><tr>' +
@@ -231,7 +446,7 @@ function renderSignals(data) {
     "<th>vol decile</th><th>candidatos</th><th>en banda</th>" +
     "<th>p_win max</th><th>EV max</th><th>Decision</th><th>Detalle</th>" +
     "<th>Side</th><th>p_win elegido</th><th>Entrada t+1</th></tr></thead><tbody>";
-  for (const s of signals) {
+  for (const s of slice) {
     const yes = s.decision === "YES";
     html += `<tr class="${yes ? "row-yes" : ""}">
       <td>${fmtTime(s.candle_close_time)}</td>
@@ -251,18 +466,22 @@ function renderSignals(data) {
   root.innerHTML = html + "</tbody></table></div>";
 }
 
-function renderTrades(data) {
+function renderTradesTable() {
+  const st = tableState.trades;
   const root = document.getElementById("trades-table");
-  const trades = data.trades || [];
-  if (trades.length === 0) {
-    root.innerHTML = '<div class="empty">Sin trades cerrados aun.</div>';
+  const filtered = filterRows(st.all, st.filter)
+    .slice().sort((a, b) => String(b.exit_time).localeCompare(String(a.exit_time)));
+  updatePager("trades", filtered.length);
+  const slice = pageSlice(filtered, st.page);
+  if (slice.length === 0) {
+    root.innerHTML = '<div class="empty">Sin trades cerrados en esta vista.</div>';
     return;
   }
   let html = '<div class="table-wrap"><table><thead><tr>' +
     "<th>Entrada</th><th>Salida</th><th>TF</th><th>Side</th>" +
     "<th>Entry $</th><th>Exit $</th><th>TP $</th><th>SL $</th><th>Motivo</th>" +
     "<th>p_win</th><th>EV</th><th>PnL EUR</th><th>PnL %</th><th>Equity</th></tr></thead><tbody>";
-  for (const t of trades) {
+  for (const t of slice) {
     const reasonCls = (t.exit_reason || "").toLowerCase();
     const pnlCls = (+t.pnl_eur >= 0) ? "tp" : "sl";
     html += `<tr>
@@ -280,22 +499,53 @@ function renderTrades(data) {
   root.innerHTML = html + "</tbody></table></div>";
 }
 
+function wireToolbars() {
+  document.querySelectorAll(".tf-buttons[data-target]").forEach(group => {
+    const target = group.dataset.target;
+    group.querySelectorAll(".tf-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        group.querySelectorAll(".tf-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        tableState[target].filter = btn.dataset.tf;
+        tableState[target].page = 0;
+        if (target === "signals") renderSignalsTable();
+        else if (target === "trades") renderTradesTable();
+      });
+    });
+  });
+  document.querySelectorAll(".pager[data-target]").forEach(pager => {
+    const target = pager.dataset.target;
+    pager.querySelector(".pager-prev").addEventListener("click", () => {
+      tableState[target].page = Math.max(0, tableState[target].page - 1);
+      if (target === "signals") renderSignalsTable();
+      else renderTradesTable();
+    });
+    pager.querySelector(".pager-next").addEventListener("click", () => {
+      tableState[target].page += 1;
+      if (target === "signals") renderSignalsTable();
+      else renderTradesTable();
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Init
+// Init + refresh loops
 // ---------------------------------------------------------------------------
 
 const charts = {};
+let liveTfInterval = "15m";
+let liveLimitByTf = { "1m": 240, "5m": 240, "15m": 200, "1h": 200, "4h": 200, "1d": 200 };
 
 async function refreshLiveChart() {
   try {
-    const candles = await fetchKlines("1m", 240);
+    const candles = await fetchKlines(liveTfInterval, liveLimitByTf[liveTfInterval]);
     charts.live.series.setData(candles);
     const last = candles[candles.length - 1];
-    const prev = candles[candles.length - 2];
+    const prev = candles[candles.length - 2] || last;
     const el = document.getElementById("live-price-value");
     el.textContent = fmtPrice(last.close);
     el.className = last.close >= prev.close ? "green" : "red";
-    document.getElementById("live-price-source").textContent = "(" + klineSource + ")";
+    document.getElementById("live-price-source").textContent = "(" + klineSource + " " + liveTfInterval + ")";
   } catch (e) { console.warn("live chart refresh failed", e); }
 }
 
@@ -318,10 +568,12 @@ async function refreshBotData() {
   ]);
   renderSummary(summary);
   renderOpenPositions(openPos);
-  renderSignals(signals);
-  renderTrades(trades);
 
-  // Equity charts
+  tableState.signals.all = signals.signals || [];
+  tableState.trades.all  = trades.trades   || [];
+  renderSignalsTable();
+  renderTradesTable();
+
   for (const tf of TFS) {
     const eq = await fetchJSON(`data/equity_${tf}.json`, { curve: [], initial_capital_eur: 100 });
     let points = (eq.curve || [])
@@ -335,23 +587,42 @@ async function refreshBotData() {
   return { trades: trades.trades || [], openPositions: openPos.open_positions || [] };
 }
 
+function wireLiveTfButtons() {
+  document.querySelectorAll("#live-tf-buttons .tf-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#live-tf-buttons .tf-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      liveTfInterval = btn.dataset.tf;
+      refreshLiveChart();
+    });
+  });
+}
+
 async function init() {
+  document.getElementById("local-tz-label").textContent = "Hora local (" + LOCAL_TZ + ")";
+
   charts.live = makeCandleChart("chart-live", 380);
   for (const tf of TFS) {
     charts[tf] = makeCandleChart("chart-tf-" + tf, 260);
     charts["eq-" + tf] = makeLineChart("chart-eq-" + tf, 180);
   }
+  initDepthChart();
+
+  wireToolbars();
+  wireLiveTfButtons();
 
   const botData = await refreshBotData();
   await refreshLiveChart();
   await refreshTfCharts(botData.trades, botData.openPositions);
+  await refreshDepth();
 
-  // Live BTC: cada 5s. TF charts: cada 60s. Datos del bot: cada 60s.
   setInterval(refreshLiveChart, 5000);
+  setInterval(refreshDepth, 5000);
   setInterval(async () => {
     const d = await refreshBotData();
     await refreshTfCharts(d.trades, d.openPositions);
   }, 60000);
+  window.addEventListener("resize", () => refreshDepth());
 }
 
 init();

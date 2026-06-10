@@ -62,3 +62,36 @@ td.timeout { color: var(--muted); }
 .red   { color: var(--red); }
 .row-yes { background: rgba(63, 185, 80, .08); }
 .kpi-value.small { font-size: 12px; }
+
+/* --- card headers con toolbar (filtros + pager) --- */
+.card-header { display: flex; justify-content: space-between; align-items: center;
+               flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.card-header h3 { margin: 0; }
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+.tf-buttons { display: flex; gap: 4px; background: #0f1115; border: 1px solid var(--border);
+              border-radius: 6px; padding: 3px; }
+.tf-btn { background: transparent; color: var(--muted); border: none; padding: 4px 10px;
+          font-size: 12px; cursor: pointer; border-radius: 4px;
+          font-family: inherit; transition: background .12s, color .12s; }
+.tf-btn:hover { color: var(--fg); }
+.tf-btn.active { background: var(--accent); color: #0f1115; font-weight: 600; }
+
+.pager { display: flex; gap: 6px; align-items: center; }
+.pager-info { color: var(--muted); font-size: 12px; min-width: 100px; text-align: right; }
+.pager button { background: var(--card); color: var(--fg); border: 1px solid var(--border);
+                width: 28px; height: 28px; border-radius: 4px; cursor: pointer;
+                font-family: inherit; font-size: 14px; line-height: 1; }
+.pager button:hover:not(:disabled) { background: var(--border); }
+.pager button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* --- order book depth chart --- */
+.chart-depth { width: 100%; height: 280px; position: relative; }
+.chart-depth canvas { width: 100%; height: 100%; display: block; }
+.depth-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+               gap: 8px 24px; margin-top: 12px; padding-top: 12px;
+               border-top: 1px solid var(--border); font-size: 13px; }
+.depth-stats > div { display: flex; justify-content: space-between; gap: 12px; }
+.depth-stats b { font-variant-numeric: tabular-nums; }
+
+#local-tz-label { margin-top: 4px; }
