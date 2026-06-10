@@ -1,37 +1,44 @@
 {
-  "tick_ts_utc": "2026-06-10T11:56:03.615280+00:00",
+  "tick_ts_utc": "2026-06-10T12:01:22.116949+00:00",
   "dry_run": false,
   "force_tf": null,
   "phases": [
     "scheduler_evaluated",
     "tick_completed"
   ],
-  "errors": [],
+  "errors": [
+    "4h feature_build_failed: BTC spot klines empty - cannot build features"
+  ],
   "due_timeframes": [
     {
       "timeframe": "15m",
-      "candle_open_time": "2026-06-10T11:30:00+00:00",
-      "candle_close_time": "2026-06-10T11:45:00+00:00",
+      "candle_open_time": "2026-06-10T11:45:00+00:00",
+      "candle_close_time": "2026-06-10T12:00:00+00:00",
       "is_due": true,
-      "seconds_since_eligible": 643.615302,
+      "seconds_since_eligible": 62.116969,
       "is_late": false
     },
     {
       "timeframe": "1h",
-      "candle_open_time": "2026-06-10T10:00:00+00:00",
-      "candle_close_time": "2026-06-10T11:00:00+00:00",
-      "is_due": false,
-      "seconds_since_eligible": 3333.615302,
-      "is_late": true
+      "candle_open_time": "2026-06-10T11:00:00+00:00",
+      "candle_close_time": "2026-06-10T12:00:00+00:00",
+      "is_due": true,
+      "seconds_since_eligible": 52.116969,
+      "is_late": false
     },
     {
       "timeframe": "4h",
-      "candle_open_time": "2026-06-10T04:00:00+00:00",
-      "candle_close_time": "2026-06-10T08:00:00+00:00",
-      "is_due": false,
-      "seconds_since_eligible": 14103.615302,
-      "is_late": true
+      "candle_open_time": "2026-06-10T08:00:00+00:00",
+      "candle_close_time": "2026-06-10T12:00:00+00:00",
+      "is_due": true,
+      "seconds_since_eligible": 22.116969,
+      "is_late": false
     }
   ],
-  "tf_results": {}
+  "tf_results": {
+    "4h": {
+      "phase": "feature_build_failed",
+      "error": "BTC spot klines empty - cannot build features"
+    }
+  }
 }
