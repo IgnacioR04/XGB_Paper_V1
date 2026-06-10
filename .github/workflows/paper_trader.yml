@@ -45,6 +45,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Connectivity diagnostics (verify Binance reachable)
+        run: |
+          echo "::group::Public IP of runner"
+          curl -s https://api.ipify.org || true
+          echo ""
+          echo "::endgroup::"
+          echo "::group::api.binance.com /ping"
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" "https://api.binance.com/api/v3/ping" || true
+          echo "::endgroup::"
+          echo "::group::api.binance.com /klines (BTCUSDT 15m limit=1)"
+          curl -sS -o /tmp/k.json -w "HTTP %{http_code}\n" "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=1" || true
+          head -c 500 /tmp/k.json 2>/dev/null; echo ""
+          echo "::endgroup::"
+          echo "::group::fapi.binance.com /ping"
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" "https://fapi.binance.com/fapi/v1/ping" || true
+          echo "::endgroup::"
+          echo "::group::data.binance.vision"
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" "https://data.binance.vision/" || true
+          echo "::endgroup::"
+
       - name: Run paper tick
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
@@ -54,8 +74,22 @@ jobs:
           if [ -n "${{ inputs.force_tf }}" ]; then ARGS="$ARGS --force-tf ${{ inputs.force_tf }}"; fi
           python scripts/run_paper_tick.py $ARGS
 
+      - name: Show last_tick.json (debug)
+        if: always()
+        run: |
+          if [ -f data/logs/last_tick.json ]; then
+            echo "::group::last_tick.json"
+            cat data/logs/last_tick.json
+            echo "::endgroup::"
+          else
+            echo "WARNING: data/logs/last_tick.json NOT created. Python script crashed before scheduler phase."
+          fi
+          echo "::group::Files written in data/logs"
+          find data/logs -type f -not -name '.gitkeep' || true
+          echo "::endgroup::"
+
       - name: Commit state, trades and dashboard data
-        if: ${{ inputs.dry_run != 'true' }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           git config user.name  "paper-trader-bot"
           git config user.email "paper-trader-bot@users.noreply.github.com"
@@ -64,5 +98,6 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "tick: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git pull --rebase --autostash origin main || true
             git push
           fi

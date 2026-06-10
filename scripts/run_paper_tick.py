@@ -71,6 +71,24 @@ def run_tick(cfg, args) -> int:
     log.info("Paper tick start (dry_run=%s)", args.dry_run)
     cfg.ensure_runtime_dirs()
 
+    # Diagnostics que SIEMPRE se escriben (incluso en error) para que el
+    # repo refleje cada tick aunque no haya nada que commitear de trades.
+    from src.utils.io import write_json_atomic
+    diag_payload = {
+        "tick_ts_utc": dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc).isoformat(),
+        "dry_run": bool(args.dry_run),
+        "force_tf": args.force_tf,
+        "phases": [],
+        "errors": [],
+        "due_timeframes": [],
+        "tf_results": {},
+    }
+    def _save_diag():
+        try:
+            write_json_atomic(cfg.logs_dir / "last_tick.json", diag_payload)
+        except Exception:
+            pass
+
     now = to_utc(dt.datetime.fromisoformat(args.now)) if args.now else to_utc()
     paper = cfg.paper
     strat = cfg.strategy
@@ -96,6 +114,12 @@ def run_tick(cfg, args) -> int:
     log.info("Timeframes due: %s",
              [(d["timeframe"], d["is_due"], d.get("is_late"))
               for d in due])
+    diag_payload["due_timeframes"] = [
+        {k: (v.isoformat() if hasattr(v, "isoformat") else v)
+         for k, v in d.items()} for d in due
+    ]
+    diag_payload["phases"].append("scheduler_evaluated")
+    _save_diag()
 
     # 2. Monitor de posiciones abiertas (cierra TP/SL/TIMEOUT)
     if not args.dry_run:
@@ -137,6 +161,10 @@ def run_tick(cfg, args) -> int:
                                          macro_cache=macro_features)
         except Exception as e:
             log.error("[%s] Feature build failed: %s", tf, e)
+            diag_payload["tf_results"][tf] = {"phase": "feature_build_failed",
+                                                "error": str(e)}
+            diag_payload["errors"].append(f"{tf} feature_build_failed: {e}")
+            _save_diag()
             continue
 
         last_row = feats.iloc[-1]
@@ -334,6 +362,8 @@ def run_tick(cfg, args) -> int:
     except Exception as e:
         log.warning("Dashboard export failed: %s", e)
 
+    diag_payload["phases"].append("tick_completed")
+    _save_diag()
     log.info("Paper tick end.")
     return 0
 
