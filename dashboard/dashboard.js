@@ -1,5 +1,6 @@
-// Dashboard XGB Paper Trader v3
+// Dashboard XGB Paper Trader v4
 // - Velas en vivo con selector de timeframe
+// - Bookmap heatmap de liquidez (order book acumulado)
 // - Order book depth chart (Binance public)
 // - Tablas paginadas + filtradas por timeframe
 
@@ -13,6 +14,152 @@ const COLORS = {
   bid: "#3fb950", bidArea: "rgba(63,185,80,.25)",
   ask: "#f85149", askArea: "rgba(248,81,73,.25)",
 };
+
+// ---------------------------------------------------------------------------
+// Bookmap: heatmap de liquidez sobre el chart principal
+// Acumula snapshots del order book cada 5s y los pinta como celdas de calor
+// detras de las velas usando la API de primitivas de lightweight-charts.
+// ---------------------------------------------------------------------------
+
+const HEATMAP = {
+  snapshots: [],
+  maxSnapshots: 2160,   // 3 h a 5 s/snap
+  bucketUSD: 20,
+  normMax: 1,
+  primitive: null,
+};
+
+function heatColor(frac) {
+  if (frac < 0.01) return null;
+  const f = Math.pow(Math.min(frac, 1), 0.6);
+  const h = 240 - f * 240;
+  const s = 85 + f * 15;
+  const l = 15 + f * 40;
+  const a = 0.22 + f * 0.58;
+  return `hsla(${h},${s}%,${l}%,${a})`;
+}
+
+function captureSnapshot(book) {
+  if (!book?.bids?.length || !book?.asks?.length) return;
+  const bk = HEATMAP.bucketUSD;
+  const levels = new Map();
+  let snapMax = 0;
+  for (const arr of [book.bids, book.asks]) {
+    for (const [p, q] of arr) {
+      const key = Math.floor(+p / bk) * bk;
+      const val = (levels.get(key) || 0) + +q;
+      levels.set(key, val);
+      if (val > snapMax) snapMax = val;
+    }
+  }
+  HEATMAP.normMax = Math.max(HEATMAP.normMax * 0.9995, snapMax * 1.05);
+  HEATMAP.snapshots.push({ time: Math.floor(Date.now() / 1000), levels });
+  while (HEATMAP.snapshots.length > HEATMAP.maxSnapshots) HEATMAP.snapshots.shift();
+  if (HEATMAP.primitive?._requestUpdate) HEATMAP.primitive._requestUpdate();
+}
+
+class LiqHeatmap {
+  constructor() {
+    this._chart = null;
+    this._series = null;
+    this._requestUpdate = null;
+    this._view = new LiqHeatmapView(this);
+    this._groups = new Map();
+    this._lastLen = 0;
+    this._lastTf = "";
+  }
+  attached({ chart, series, requestUpdate }) {
+    this._chart = chart; this._series = series; this._requestUpdate = requestUpdate;
+  }
+  detached() { this._chart = this._series = this._requestUpdate = null; }
+  paneViews() { return [this._view]; }
+
+  recompute() {
+    if (HEATMAP.snapshots.length === this._lastLen && liveTfInterval === this._lastTf) return;
+    this._lastLen = HEATMAP.snapshots.length;
+    this._lastTf = liveTfInterval;
+    const cSec = TF_SECONDS[liveTfInterval] || 900;
+    const groups = new Map();
+    for (const snap of HEATMAP.snapshots) {
+      const ct = Math.floor(snap.time / cSec) * cSec;
+      if (!groups.has(ct)) groups.set(ct, []);
+      groups.get(ct).push(snap);
+    }
+    this._groups = new Map();
+    for (const [ct, snaps] of groups) {
+      const agg = new Map();
+      for (const snap of snaps) {
+        for (const [price, qty] of snap.levels) {
+          agg.set(price, Math.max(agg.get(price) || 0, qty));
+        }
+      }
+      this._groups.set(ct, agg);
+    }
+  }
+}
+
+class LiqHeatmapView {
+  constructor(src) { this._r = new LiqHeatmapRenderer(src); }
+  renderer() { return this._r; }
+  zOrder() { return "bottom"; }
+}
+
+class LiqHeatmapRenderer {
+  constructor(src) { this._src = src; }
+  draw(target) {
+    this._src.recompute();
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      const { _chart: chart, _series: series, _groups: groups } = this._src;
+      if (!chart || !series || groups.size === 0) return;
+      const cSec = TF_SECONDS[liveTfInterval] || 900;
+      const bk = HEATMAP.bucketUSD;
+      const norm = HEATMAP.normMax || 1;
+
+      for (const [ct, agg] of groups) {
+        const x = chart.timeScale().timeToCoordinate(ct);
+        if (x === null || x < -60 || x > mediaSize.width + 60) continue;
+        const xN = chart.timeScale().timeToCoordinate(ct + cSec);
+        let bW;
+        if (xN !== null) bW = Math.max(Math.abs(xN - x) - 1, 3);
+        else {
+          const xP = chart.timeScale().timeToCoordinate(ct - cSec);
+          bW = xP !== null ? Math.max(Math.abs(x - xP) - 1, 3) : 8;
+        }
+        for (const [price, qty] of agg) {
+          const color = heatColor(qty / norm);
+          if (!color) continue;
+          const yB = series.priceToCoordinate(price);
+          const yT = series.priceToCoordinate(price + bk);
+          if (yB === null || yT === null) continue;
+          const cH = Math.abs(yB - yT);
+          if (cH < 0.3) continue;
+          ctx.fillStyle = color;
+          ctx.fillRect(Math.round(x - bW / 2), Math.round(Math.min(yT, yB)),
+                       Math.ceil(bW), Math.max(Math.ceil(cH), 1));
+        }
+      }
+
+      // Current snapshot: vertical strip at right edge (always visible, even on first load)
+      const latest = HEATMAP.snapshots[HEATMAP.snapshots.length - 1];
+      if (latest) {
+        const stripW = 6;
+        const stripX = mediaSize.width - stripW - 2;
+        for (const [price, qty] of latest.levels) {
+          const color = heatColor(qty / norm);
+          if (!color) continue;
+          const yB = series.priceToCoordinate(price);
+          const yT = series.priceToCoordinate(price + bk);
+          if (yB === null || yT === null) continue;
+          const cH = Math.abs(yB - yT);
+          if (cH < 0.3) continue;
+          ctx.fillStyle = color;
+          ctx.fillRect(stripX, Math.round(Math.min(yT, yB)),
+                       stripW, Math.max(Math.ceil(cH), 1));
+        }
+      }
+    });
+  }
+}
 
 const PAGE_SIZE = 25;
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -248,6 +395,7 @@ function renderDepth(depth) {
 async function refreshDepth() {
   const book = await fetchOrderBook();
   if (!book) return;
+  captureSnapshot(book);
   const depth = buildCumulativeDepth(book);
   renderDepth(depth);
 
@@ -602,6 +750,10 @@ async function init() {
   document.getElementById("local-tz-label").textContent = "Hora local (" + LOCAL_TZ + ")";
 
   charts.live = makeCandleChart("chart-live", 380);
+  try {
+    HEATMAP.primitive = new LiqHeatmap();
+    charts.live.series.attachPrimitive(HEATMAP.primitive);
+  } catch (e) { console.warn("Heatmap primitive not supported:", e); }
   for (const tf of TFS) {
     charts[tf] = makeCandleChart("chart-tf-" + tf, 260);
     charts["eq-" + tf] = makeLineChart("chart-eq-" + tf, 180);
@@ -622,6 +774,14 @@ async function init() {
     const d = await refreshBotData();
     await refreshTfCharts(d.trades, d.openPositions);
   }, 60000);
+  setInterval(() => {
+    const n = HEATMAP.snapshots.length;
+    const el = document.getElementById("heatmap-status");
+    if (el && n > 0) {
+      const mins = Math.round(n * 5 / 60);
+      el.textContent = `Heatmap de liquidez: ${n} snapshots (${mins} min acumulados)`;
+    }
+  }, 10000);
   window.addEventListener("resize", () => refreshDepth());
 }
 

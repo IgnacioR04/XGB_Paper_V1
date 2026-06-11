@@ -28,7 +28,10 @@
 
 <section class="card">
   <div class="card-header">
-    <h3>Bitcoin en tiempo real</h3>
+    <div>
+      <h3>Bitcoin en tiempo real</h3>
+      <span id="heatmap-status" class="muted small">Heatmap de liquidez: cargando...</span>
+    </div>
     <div id="live-tf-buttons" class="tf-buttons">
       <button data-tf="1m" class="tf-btn">1m</button>
       <button data-tf="5m" class="tf-btn">5m</button>
@@ -39,6 +42,12 @@
     </div>
   </div>
   <div id="chart-live" class="chart-big"></div>
+  <div class="heatmap-legend">
+    <span class="muted small">Liquidez:</span>
+    <span class="heatmap-gradient"></span>
+    <span class="muted small">baja</span>
+    <span class="muted small" style="margin-left:auto">alta</span>
+  </div>
 </section>
 
 <section class="card">

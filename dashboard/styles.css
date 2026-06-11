@@ -95,3 +95,16 @@ td.timeout { color: var(--muted); }
 .depth-stats b { font-variant-numeric: tabular-nums; }
 
 #local-tz-label { margin-top: 4px; }
+
+/* --- heatmap legend --- */
+.heatmap-legend { display: flex; align-items: center; gap: 8px;
+                  margin-top: 8px; padding-top: 8px;
+                  border-top: 1px solid var(--border); }
+.heatmap-gradient { flex: 1; max-width: 200px; height: 8px; border-radius: 4px;
+                    background: linear-gradient(to right,
+                      hsla(240,85%,15%,.35),
+                      hsla(180,90%,28%,.55),
+                      hsla(120,92%,35%,.65),
+                      hsla(60,95%,42%,.72),
+                      hsla(30,98%,48%,.78),
+                      hsla(0,100%,55%,.85)); }
