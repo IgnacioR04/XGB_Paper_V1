@@ -355,6 +355,46 @@ for _, brow in best_cfg.iterrows():
     print()
 """
 
+C7B = """# Celda 7B
+# Objetivo
+# IMPORTANTE - los PnL diarios de la celda 7 son sobre cartera COMPUESTA
+# (al final del test la cartera vale miles de EUR y un buen dia son cientos
+# de EUR). Para comparar con el bot real (cartera de 100 EUR fija al inicio)
+# recalculamos con notional FIJO de 100 EUR por trade, sin reinversion.
+
+
+def simulate_fixed_notional(sig, capital_fijo=CAPITAL_INI):
+    sig = sig.sort_values("timestamp").reset_index(drop=True)
+    open_until = None
+    taken = []
+    for _, row in sig.iterrows():
+        ts = row["timestamp"]
+        if open_until is not None and ts < open_until:
+            continue
+        dur = row["duration_real_min"]
+        if not np.isfinite(dur):
+            continue
+        open_until = ts + pd.Timedelta(minutes=float(dur))
+        taken.append({"timestamp": ts,
+                      "pnl_eur": capital_fijo * row["net_return_cost012"]})
+    return pd.DataFrame(taken)
+
+
+print("=== PnL con notional FIJO 100 EUR (regla bot: 1 pos, sin componer) ===")
+for tf in TFS:
+    s = signals[("test", tf)]
+    if len(s) == 0:
+        continue
+    t = simulate_fixed_notional(s)
+    daily = t.set_index("timestamp")["pnl_eur"].resample("1D").sum()
+    print(f"--- {tf} (TEST) ---")
+    print(f"  trades: {len(t)} | PnL total: {t['pnl_eur'].sum():+.1f} EUR")
+    print(f"  PnL diario medio: {daily.mean():+.3f} | p10/p90: "
+          f"{daily.quantile(.1):+.2f} / {daily.quantile(.9):+.2f}")
+    print(f"  mejor dia: {daily.max():+.2f} | peor dia: {daily.min():+.2f}")
+    print(f"  PnL medio por trade: {t['pnl_eur'].mean():+.3f} EUR")
+"""
+
 C8 = """# Celda 8
 # Objetivo
 # Tendencia vs rentabilidad. Clasificamos el regimen de mercado con el close
@@ -479,7 +519,7 @@ def add_cell(kind, src):
 
 
 add_cell("markdown", MD0)
-for c in [C1, C2, C3, C4, C5, C6, C7, C8, C9]:
+for c in [C1, C2, C3, C4, C5, C6, C7, C7B, C8, C9]:
     add_cell("code", c)
 
 OUT_NB.parent.mkdir(parents=True, exist_ok=True)
