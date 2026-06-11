@@ -25,34 +25,52 @@ const HEATMAP = {
   snapshots: [],
   maxSnapshots: 2160,   // 3 h a 5 s/snap
   bucketUSD: 20,
-  normMax: 1,
+  norm: 0,              // normalizacion por percentil (EMA suavizada)
   primitive: null,
 };
 
-function heatColor(frac) {
-  if (frac < 0.01) return null;
-  const f = Math.pow(Math.min(frac, 1), 0.6);
-  const h = 240 - f * 240;
-  const s = 85 + f * 15;
-  const l = 15 + f * 40;
-  const a = 0.22 + f * 0.58;
-  return `hsla(${h},${s}%,${l}%,${a})`;
+// Paleta estilo bookmap: azul oscuro -> azul -> cyan -> verde -> amarillo
+// -> naranja -> rojo. Cada stop: [frac, r, g, b, alpha]
+const HEAT_STOPS = [
+  [0.00,  15,  28,  85, 0.32],
+  [0.18,  10, 105, 185, 0.48],
+  [0.35,   0, 178, 172, 0.58],
+  [0.52,  48, 188,  78, 0.68],
+  [0.70, 238, 218,  48, 0.80],
+  [0.85, 255, 142,  12, 0.90],
+  [1.00, 255,  48,  48, 0.96],
+];
+
+function heatColor(frac, alphaScale = 1) {
+  if (!(frac > 0.03)) return null;
+  const f = Math.pow(Math.min(frac, 1), 0.55);
+  let i = 1;
+  while (i < HEAT_STOPS.length - 1 && HEAT_STOPS[i][0] < f) i++;
+  const [f0, r0, g0, b0, a0] = HEAT_STOPS[i - 1];
+  const [f1, r1, g1, b1, a1] = HEAT_STOPS[i];
+  const t = (f - f0) / Math.max(f1 - f0, 1e-9);
+  const r = Math.round(r0 + (r1 - r0) * t);
+  const g = Math.round(g0 + (g1 - g0) * t);
+  const b = Math.round(b0 + (b1 - b0) * t);
+  const a = (a0 + (a1 - a0) * t) * alphaScale;
+  return `rgba(${r},${g},${b},${a.toFixed(3)})`;
 }
 
 function captureSnapshot(book) {
   if (!book?.bids?.length || !book?.asks?.length) return;
   const bk = HEATMAP.bucketUSD;
   const levels = new Map();
-  let snapMax = 0;
   for (const arr of [book.bids, book.asks]) {
     for (const [p, q] of arr) {
       const key = Math.floor(+p / bk) * bk;
-      const val = (levels.get(key) || 0) + +q;
-      levels.set(key, val);
-      if (val > snapMax) snapMax = val;
+      levels.set(key, (levels.get(key) || 0) + +q);
     }
   }
-  HEATMAP.normMax = Math.max(HEATMAP.normMax * 0.9995, snapMax * 1.05);
+  // Normalizacion robusta: percentil 95 de los buckets del snapshot,
+  // suavizado con EMA para que la escala no salte entre refrescos.
+  const vals = [...levels.values()].sort((a, b) => a - b);
+  const p95 = vals[Math.floor(vals.length * 0.95)] || 1;
+  HEATMAP.norm = HEATMAP.norm === 0 ? p95 : HEATMAP.norm * 0.97 + p95 * 0.03;
   HEATMAP.snapshots.push({ time: Math.floor(Date.now() / 1000), levels });
   while (HEATMAP.snapshots.length > HEATMAP.maxSnapshots) HEATMAP.snapshots.shift();
   if (HEATMAP.primitive?._requestUpdate) HEATMAP.primitive._requestUpdate();
@@ -106,55 +124,58 @@ class LiqHeatmapView {
 
 class LiqHeatmapRenderer {
   constructor(src) { this._src = src; }
+
+  _drawBand(ctx, series, price, bk, color, x0, x1) {
+    const yB = series.priceToCoordinate(price);
+    const yT = series.priceToCoordinate(price + bk);
+    if (yB === null || yT === null) return;
+    const cH = Math.abs(yB - yT);
+    if (cH < 0.3) return;
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(x0), Math.round(Math.min(yT, yB)),
+                 Math.ceil(x1 - x0), Math.max(Math.ceil(cH), 1));
+  }
+
   draw(target) {
     this._src.recompute();
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const { _chart: chart, _series: series, _groups: groups } = this._src;
-      if (!chart || !series || groups.size === 0) return;
+      if (!chart || !series) return;
       const cSec = TF_SECONDS[liveTfInterval] || 900;
       const bk = HEATMAP.bucketUSD;
-      const norm = HEATMAP.normMax || 1;
+      const norm = HEATMAP.norm || 1;
+      const latest = HEATMAP.snapshots[HEATMAP.snapshots.length - 1];
+      if (!latest) return;
 
+      // 1) Libro ACTUAL como bandas horizontales a ancho completo (como en
+      //    bookmap/TradingView: los niveles de liquidez en reposo se ven como
+      //    franjas que cruzan todo el chart).
+      for (const [price, qty] of latest.levels) {
+        const color = heatColor(qty / norm, 0.55);
+        if (!color) continue;
+        this._drawBand(ctx, series, price, bk, color, 0, mediaSize.width);
+      }
+
+      // 2) Historia acumulada por vela encima (donde tenemos snapshots reales
+      //    el mapa muestra la evolucion del libro, celda a celda).
+      const firstSnapTime = HEATMAP.snapshots[0].time;
       for (const [ct, agg] of groups) {
         const x = chart.timeScale().timeToCoordinate(ct);
         if (x === null || x < -60 || x > mediaSize.width + 60) continue;
         const xN = chart.timeScale().timeToCoordinate(ct + cSec);
         let bW;
-        if (xN !== null) bW = Math.max(Math.abs(xN - x) - 1, 3);
+        if (xN !== null) bW = Math.max(Math.abs(xN - x), 3);
         else {
           const xP = chart.timeScale().timeToCoordinate(ct - cSec);
-          bW = xP !== null ? Math.max(Math.abs(x - xP) - 1, 3) : 8;
+          bW = xP !== null ? Math.max(Math.abs(x - xP), 3) : 8;
         }
+        // limpiar la franja de fondo bajo esta vela para que la celda
+        // historica no se mezcle con la banda del libro actual
+        const xL = x - bW / 2, xR = x + bW / 2;
         for (const [price, qty] of agg) {
-          const color = heatColor(qty / norm);
+          const color = heatColor(qty / norm, 1.0);
           if (!color) continue;
-          const yB = series.priceToCoordinate(price);
-          const yT = series.priceToCoordinate(price + bk);
-          if (yB === null || yT === null) continue;
-          const cH = Math.abs(yB - yT);
-          if (cH < 0.3) continue;
-          ctx.fillStyle = color;
-          ctx.fillRect(Math.round(x - bW / 2), Math.round(Math.min(yT, yB)),
-                       Math.ceil(bW), Math.max(Math.ceil(cH), 1));
-        }
-      }
-
-      // Current snapshot: vertical strip at right edge (always visible, even on first load)
-      const latest = HEATMAP.snapshots[HEATMAP.snapshots.length - 1];
-      if (latest) {
-        const stripW = 6;
-        const stripX = mediaSize.width - stripW - 2;
-        for (const [price, qty] of latest.levels) {
-          const color = heatColor(qty / norm);
-          if (!color) continue;
-          const yB = series.priceToCoordinate(price);
-          const yT = series.priceToCoordinate(price + bk);
-          if (yB === null || yT === null) continue;
-          const cH = Math.abs(yB - yT);
-          if (cH < 0.3) continue;
-          ctx.fillStyle = color;
-          ctx.fillRect(stripX, Math.round(Math.min(yT, yB)),
-                       stripW, Math.max(Math.ceil(cH), 1));
+          this._drawBand(ctx, series, price, bk, color, xL, xR);
         }
       }
     });
@@ -253,7 +274,7 @@ async function fetchKlines(interval, limit) {
 // ---------------------------------------------------------------------------
 
 async function fetchOrderBook() {
-  const url = "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=1000";
+  const url = "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=5000";
   try {
     const r = await fetch(url);
     if (!r.ok) throw new Error(r.status);
