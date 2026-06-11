@@ -49,6 +49,16 @@ def _signals_history_df(logs_dir: Path, max_rows: int = 2000) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     df = pd.concat(frames, ignore_index=True, sort=False)
+    # Cada vela se evalua en varios ticks de 5 min -> dedupe por
+    # (timeframe, vela). Si alguna evaluacion fue YES prevalece esa fila;
+    # si no, la ultima evaluacion de la vela.
+    if {"timeframe", "candle_close_time", "decision"}.issubset(df.columns):
+        df["_is_yes"] = (df["decision"] == "YES").astype(int)
+        df = (df.sort_values(["_is_yes", "tick_ts_utc"])
+                .drop_duplicates(subset=["timeframe", "candle_close_time"],
+                                 keep="last")
+                .drop(columns=["_is_yes"])
+                .sort_values("tick_ts_utc"))
     return df.tail(max_rows)
 
 
