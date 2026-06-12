@@ -32,8 +32,8 @@ max_positions_per_wallet: 1
 # la expectancy crece monotonamente con p_win en el modelo causal)
 probability_bands:
   "15m":
-    min: 0.67
-    max: 1.0
+    min: 0.55          # bajado 2026-06-12: con 0.67 nunca opera (p_iso max 0.613);
+    max: 1.0           # OJO: a 0.55 el test dio -0.016 EUR/dia (observacion paper)
   "1h":
     min: 0.67
     max: 1.0
