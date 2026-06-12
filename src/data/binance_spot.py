@@ -267,6 +267,41 @@ def fetch_last_n_closed_with_fallback(symbol: str, interval: str, n: int,
     return pd.DataFrame(), "empty"
 
 
+def fetch_last_n_closed_paginated(symbol: str, interval: str, n: int,
+                                   timeout: int = 15) -> tuple[pd.DataFrame, str]:
+    """Como fetch_last_n_closed_with_fallback pero soporta n > 1000 en
+    Binance paginando con endTime (Coinbase ya pagina internamente)."""
+    if n <= 1000:
+        return fetch_last_n_closed_with_fallback(symbol, interval, n, timeout)
+    try:
+        frames = []
+        end_ms = None
+        remaining = n + 1
+        while remaining > 0:
+            df = fetch_klines(symbol, interval, limit=min(1000, remaining),
+                              end_time_ms=end_ms, timeout=timeout)
+            if df.empty:
+                break
+            frames.append(df)
+            remaining -= len(df)
+            end_ms = int(df["open_time"].iloc[0].timestamp() * 1000) - 1
+            if len(df) < 1000:
+                break
+        if frames:
+            full = (pd.concat(frames)
+                    .drop_duplicates("open_time")
+                    .sort_values("open_time"))
+            now = pd.Timestamp.utcnow()
+            if now.tzinfo is None:
+                now = now.tz_localize("UTC")
+            closed = full[full["close_time"] <= now]
+            if not closed.empty:
+                return closed.tail(n).reset_index(drop=True), "binance_spot"
+    except Exception as e:
+        log.warning("Binance paginated failed for %s %s: %s", symbol, interval, e)
+    return fetch_last_n_closed_with_fallback(symbol, interval, min(n, 8000), timeout)
+
+
 def save_klines_parquet(df: pd.DataFrame, out_dir: Path, symbol: str,
                         interval: str) -> Path:
     out_dir = Path(out_dir)

@@ -27,19 +27,22 @@ max_positions_per_wallet: 1
 # Bandas de probabilidad calibrada (p_win_isotonic)
 # Regla por defecto: min <= p_win < max  (cerrada por abajo, abierta arriba)
 # ---------------------------------------------------------------
+# Threshold 0.67 elegido tras el reentrenamiento causal (2026-06-12):
+# se opera todo candidato con p_win_isotonic >= 0.67 (sin tope superior,
+# la expectancy crece monotonamente con p_win en el modelo causal)
 probability_bands:
   "15m":
-    min: 0.65
-    max: 0.70
+    min: 0.67
+    max: 1.0
   "1h":
-    min: 0.70
-    max: 0.75
+    min: 0.67
+    max: 1.0
   "4h":
-    min: 0.65
-    max: 0.70
+    min: 0.67
+    max: 1.0
 
 # Si true: filtra solo por p_win >= min (banda abierta arriba)
-allow_above_band: false
+allow_above_band: true
 # Si true: rechaza candidatos con EV_pred <= 0 incluso si caen en la banda
 require_positive_ev: false
 

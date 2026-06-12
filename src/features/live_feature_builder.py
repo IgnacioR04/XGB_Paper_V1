@@ -1,17 +1,18 @@
-"""Constructor de features en vivo.
+"""Constructor de features en vivo - v2 con PARIDAD de entrenamiento.
 
-Para un timeframe y un timestamp objetivo (= ultimo close confirmado),
-descarga datos de Binance, calcula returns/TA/lags/rolling/calendar y
-combina con cache externa (macro/onchain/sentiment/cross-crypto/funding)
-para producir UNA fila de features alineada al feature_schema.
+CLAVE: en entrenamiento, las features de mercado de los TRES modelos
+(15m/1h/4h) salen del GRID DE 15 MINUTOS (el master). Por eso este builder
+SIEMPRE descarga velas de 15m y computa las features sobre ese grid; la
+misma fila final sirve para los tres modelos (los cierres de vela de
+1h/4h coinciden con cierres de 15m).
 
-Lo que NO genera (queda NaN, XGB lo tolera):
-- vp_*  (Volume Profile - requiere aggTrades)
-- reg_*  (regime flags - requeririan portar M11)
-- Algunas ta_* avanzadas (Ichimoku, Fibonacci, ADX completo)
+Las formulas replican T02/T03/T06/T13 (versiones causales) via
+src/features/parity_features.py, validadas contra el master causal.
 
-Esto es una version honesta de MVP. Cubre las ~400 features mas importantes
-(OHLCV + ret + ta basicos + lags + rolling + calendar + macro/onchain/sentiment).
+Sigue sin cubrir (NaN, XGB lo tolera):
+- cx_* de mcap/dominance (requiere fuente cross-crypto, pendiente)
+- ext_/macro_ series intradia (solo broadcast del ultimo valor de cache)
+- der_* (funding geo-bloqueado en runners), reg_*, sent_ series
 """
 from __future__ import annotations
 
@@ -22,19 +23,20 @@ from ..data import binance_spot as bspot
 from ..data import binance_futures as bfut
 from ..utils.logging_utils import get_logger
 from . import calendar as cal_mod
-from . import lags_rolling as lr_mod
-from . import returns as ret_mod
-from . import technicals as ta_mod
+from .parity_features import compute_parity_features
 
 log = get_logger("feature_builder")
 
+# Velas 15m necesarias: vp_7d (672) + warmup EMA200/rolling96 + apertura
+# semanal (hasta 14 dias = 1344). 1600 da margen.
+MIN_HISTORY_15M = 1600
+
 
 def _kline_to_ohlcv_prefix(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
-    """Renombra columnas de un kline DataFrame al esquema ohlcv_<prefix>_."""
     cols = {
         "open": f"ohlcv_{prefix}_open",
         "high": f"ohlcv_{prefix}_high",
-        "low":  f"ohlcv_{prefix}_low",
+        "low": f"ohlcv_{prefix}_low",
         "close": f"ohlcv_{prefix}_close",
         "volume": f"ohlcv_{prefix}_volume",
         "quote_volume": f"ohlcv_{prefix}_quote_volume",
@@ -43,132 +45,109 @@ def _kline_to_ohlcv_prefix(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
         "taker_buy_qvol": f"ohlcv_{prefix}_taker_buy_qvol",
     }
     df = df.set_index("open_time").sort_index()
-    return df.rename(columns=cols)[[v for v in cols.values()]]
+    keep = [v for k, v in cols.items() if k in df.columns]
+    return df.rename(columns=cols)[keep]
 
 
-def build_live_features(timeframe: str,
-                        rolling_history: int = 400,
+def build_live_features(timeframe: str = "15m",
+                        rolling_history: int = MIN_HISTORY_15M,
                         macro_cache: dict | None = None) -> pd.DataFrame:
-    """Construye un DataFrame de features. Devuelve TODAS las velas en historial;
-    la ultima fila es la usada para inferencia.
+    """Construye el frame de features sobre el GRID DE 15M.
 
-    Args:
-        timeframe: "15m", "1h" o "4h"
-        rolling_history: cuantas velas pedir a Binance para calcular indicadores
-        macro_cache: dict con valores externos por nombre {"sent_fear_greed": x,
-                      "macro_spx_close": y, "oc_hashrate": z, ...}.
-                     Estos valores se rellenan en la fila final (broadcasted).
-
-    Returns:
-        DataFrame indexed by candle open_time UTC. La ultima fila tiene los
-        valores mas recientes (vela cerrada).
+    El argumento `timeframe` se conserva por compatibilidad pero las
+    features siempre se computan en 15m (como en entrenamiento). La ultima
+    fila es la vela 15m cerrada mas reciente y es la fila de inferencia
+    para cualquier TF cuyo cierre coincida.
     """
+    n = max(int(rolling_history), MIN_HISTORY_15M)
     spot_syms = ["BTCUSDT", "ETHUSDT", "ETHBTC", "XRPUSDT", "XRPBTC"]
     spot_prefixes = ["btc", "eth", "ethbtc", "xrp", "xrpbtc"]
 
-    log.info("Fetching spot klines (%s) for %d symbols...", timeframe, len(spot_syms))
+    log.info("Fetching 15m klines (%d candles) for %d symbols...",
+             n, len(spot_syms))
     spot_dfs: dict[str, pd.DataFrame] = {}
-    source_per_symbol: dict[str, str] = {}
+    sources: dict[str, str] = {}
     for sym, pfx in zip(spot_syms, spot_prefixes):
         try:
-            kdf, source = bspot.fetch_last_n_closed_with_fallback(
-                sym, timeframe, rolling_history,
-            )
-            source_per_symbol[sym] = source
-            if kdf.empty:
-                log.warning("Empty klines for %s %s (source=%s)", sym, timeframe, source)
-                spot_dfs[pfx] = pd.DataFrame()
-            else:
-                spot_dfs[pfx] = _kline_to_ohlcv_prefix(kdf, pfx)
+            kdf, src = bspot.fetch_last_n_closed_paginated(sym, "15m", n)
+            sources[sym] = src
+            spot_dfs[pfx] = (_kline_to_ohlcv_prefix(kdf, pfx)
+                             if not kdf.empty else pd.DataFrame())
         except Exception as e:
-            log.warning("Failed spot %s %s: %s", sym, timeframe, e)
-            source_per_symbol[sym] = f"error: {e}"
+            log.warning("Failed spot %s: %s", sym, e)
+            sources[sym] = f"error: {e}"
             spot_dfs[pfx] = pd.DataFrame()
-    log.info("Spot sources: %s", source_per_symbol)
+    log.info("Spot sources: %s", sources)
 
-    # base = BTC spot (es el indice maestro)
     btc = spot_dfs["btc"]
     if btc.empty:
         raise RuntimeError("BTC spot klines empty - cannot build features")
+    if btc.index.tz is not None:
+        for pfx in spot_dfs:
+            if not spot_dfs[pfx].empty:
+                spot_dfs[pfx].index = (spot_dfs[pfx].index
+                                       .tz_convert("UTC").tz_localize(None))
+        btc = spot_dfs["btc"]
 
     feats = pd.DataFrame(index=btc.index)
-    # Concatenar todos los OHLCV con prefijos
-    ohlcv_parts = [df for df in spot_dfs.values() if not df.empty]
-    feats = feats.join(pd.concat(ohlcv_parts, axis=1), how="left")
+    feats = feats.join(pd.concat(
+        [df for df in spot_dfs.values() if not df.empty], axis=1), how="left")
 
-    # Futures
-    log.info("Fetching futures klines (%s)...", timeframe)
-    try:
-        fut = bfut.fetch_klines("BTCUSDT", timeframe, limit=rolling_history)
-        fut = fut.set_index("open_time").sort_index()
-        feats["ohlcv_btc_futures_close"] = fut["close"].reindex(feats.index)
-    except Exception as e:
-        log.warning("Failed futures klines: %s", e)
-        feats["ohlcv_btc_futures_close"] = np.nan
-
-    try:
-        mark = bfut.fetch_mark_price_klines("BTCUSDT", timeframe, limit=rolling_history)
-        mark = mark.set_index("open_time").sort_index()
-        feats["ohlcv_btc_mark_price"] = mark["close"].reindex(feats.index)
-    except Exception as e:
-        log.warning("Failed mark price: %s", e)
-        feats["ohlcv_btc_mark_price"] = np.nan
-
-    try:
-        idx_df = bfut.fetch_index_price_klines("BTCUSDT", timeframe, limit=rolling_history)
-        idx_df = idx_df.set_index("open_time").sort_index()
-        feats["ohlcv_btc_index_price"] = idx_df["close"].reindex(feats.index)
-    except Exception as e:
-        log.warning("Failed index price: %s", e)
-        feats["ohlcv_btc_index_price"] = np.nan
-
-    # Spread spot-perp
+    # Futures / mark / index (15m; NaN si geo-bloqueado)
+    for name, fn in [("ohlcv_btc_futures_close", bfut.fetch_klines),
+                     ("ohlcv_btc_mark_price", bfut.fetch_mark_price_klines),
+                     ("ohlcv_btc_index_price", bfut.fetch_index_price_klines)]:
+        try:
+            fdf = fn("BTCUSDT", "15m", limit=1000).set_index("open_time").sort_index()
+            if fdf.index.tz is not None:
+                fdf.index = fdf.index.tz_convert("UTC").tz_localize(None)
+            feats[name] = fdf["close"].reindex(feats.index)
+        except Exception as e:
+            log.warning("Failed %s: %s", name, e)
+            feats[name] = np.nan
     feats["ohlcv_btc_spot_perp_spread"] = (
         feats["ohlcv_btc_futures_close"] - feats["ohlcv_btc_close"]
     ) / feats["ohlcv_btc_close"]
 
-    # Cross ratios
-    if "ohlcv_ethbtc_close" in feats.columns:
+    # Cross ratios (igual que M01)
+    if "ohlcv_ethbtc_close" in feats:
         feats["ohlcv_ethbtc_ratio"] = feats["ohlcv_ethbtc_close"]
         feats["ohlcv_ethbtc_return"] = feats["ohlcv_ethbtc_close"].pct_change()
-    if "ohlcv_eth_close" in feats.columns and "ohlcv_btc_close" in feats.columns:
+    if "ohlcv_eth_close" in feats:
         feats["ohlcv_eth_rel_strength"] = (
-            feats["ohlcv_eth_close"].pct_change() - feats["ohlcv_btc_close"].pct_change()
-        )
-    if "ohlcv_xrpbtc_close" in feats.columns:
+            feats["ohlcv_eth_close"].pct_change()
+            - feats["ohlcv_btc_close"].pct_change())
+    if "ohlcv_xrpbtc_close" in feats:
         feats["ohlcv_xrpbtc_ratio"] = feats["ohlcv_xrpbtc_close"]
-    if "ohlcv_xrp_close" in feats.columns and "ohlcv_btc_close" in feats.columns:
+    if "ohlcv_xrp_close" in feats:
         feats["ohlcv_xrp_rel_strength"] = (
-            feats["ohlcv_xrp_close"].pct_change() - feats["ohlcv_btc_close"].pct_change()
-        )
+            feats["ohlcv_xrp_close"].pct_change()
+            - feats["ohlcv_btc_close"].pct_change())
         feats["ohlcv_xrp_volume_spike"] = (
-            feats.get("ohlcv_xrp_volume", pd.Series(np.nan, index=feats.index))
-            / feats.get("ohlcv_xrp_volume", pd.Series(np.nan, index=feats.index))
-                .rolling(20, min_periods=5).mean()
-        )
+            feats["ohlcv_xrp_volume"]
+            / feats["ohlcv_xrp_volume"].rolling(20, min_periods=5).mean())
 
-    # Returns / TA
-    btc_ohlc = pd.DataFrame({
-        "open": feats["ohlcv_btc_open"],
-        "high": feats["ohlcv_btc_high"],
-        "low": feats["ohlcv_btc_low"],
-        "close": feats["ohlcv_btc_close"],
-        "volume": feats["ohlcv_btc_volume"],
-    })
-    feats = feats.join(ret_mod.compute_returns(btc_ohlc))
-    feats = feats.join(ta_mod.compute_technicals(btc_ohlc))
+    # ======== Features con paridad de entrenamiento (T02/T03/T06/T13) ====
+    parity = compute_parity_features(feats)
+    feats = pd.concat([feats, parity], axis=1)
+    feats = feats.loc[:, ~feats.columns.duplicated(keep="last")]
 
-    # Lags + Rolling
-    feats = feats.join(lr_mod.compute_lags_rolling(feats))
+    # inter_ que dependen de columnas cruzadas
+    if "ohlcv_eth_rel_strength" in feats:
+        feats["inter_logret_minus_ethrelstr"] = (
+            feats["ret_log_return"] - feats["ohlcv_eth_rel_strength"])
 
-    # Calendar
+    # Calendario
     feats = feats.join(cal_mod.compute_calendar(feats.index))
 
-    # Macro cache (broadcast del ultimo valor a todas las filas; el modelo
-    # ve la ultima fila como input)
+    # Macro cache (broadcast del ultimo valor)
     if macro_cache:
         for k, v in macro_cache.items():
             feats[k] = v
+        if "macro_ndx_return_1d" in feats:
+            feats["inter_logret_minus_ndx"] = (
+                feats["ret_log_return"] - feats["macro_ndx_return_1d"])
 
-    log.info("Built %d features over %d candles", feats.shape[1], len(feats))
+    log.info("Built %d features over %d candles (grid 15m)",
+             feats.shape[1], len(feats))
     return feats

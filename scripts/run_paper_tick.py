@@ -140,6 +140,11 @@ def run_tick(cfg, args) -> int:
     # 4. Procesar cada TF due
     vol_bounds = load_decile_bounds(cfg.schemas_dir / "vol_decile_bounds.json")
 
+    # Las features se construyen UNA vez por tick sobre el grid de 15m
+    # (en entrenamiento los 3 modelos usan features del grid 15m) y se
+    # comparten entre los TFs que esten due.
+    feats15 = None
+
     for d in due:
         if not d.get("is_due"):
             if d.get("is_late"):
@@ -152,32 +157,43 @@ def run_tick(cfg, args) -> int:
         tf = d["timeframe"]
         close_t = d["candle_close_time"]
 
-        # 4a. Build features
-        log.info("[%s] Building live features...", tf)
-        try:
-            feats = build_live_features(tf,
-                                         rolling_history=cfg.data_sources["binance_spot"]
-                                             ["rolling_history_candles"],
-                                         macro_cache=macro_features)
-        except Exception as e:
-            log.error("[%s] Feature build failed: %s", tf, e)
-            diag_payload["tf_results"][tf] = {"phase": "feature_build_failed",
-                                                "error": str(e)}
-            diag_payload["errors"].append(f"{tf} feature_build_failed: {e}")
-            _save_diag()
-            continue
+        # 4a. Build features (compartidas, grid 15m)
+        if feats15 is None:
+            log.info("Building live features (grid 15m, compartido)...")
+            try:
+                feats15 = build_live_features(
+                    "15m",
+                    rolling_history=max(
+                        cfg.data_sources["binance_spot"]
+                        ["rolling_history_candles"], 1600),
+                    macro_cache=macro_features)
+            except Exception as e:
+                log.error("Feature build failed: %s", e)
+                diag_payload["tf_results"][tf] = {
+                    "phase": "feature_build_failed", "error": str(e)}
+                diag_payload["errors"].append(f"feature_build_failed: {e}")
+                _save_diag()
+                break
+        feats = feats15
 
         last_row = feats.iloc[-1]
         candle_open = feats.index[-1].to_pydatetime() if hasattr(feats.index[-1], "to_pydatetime") else feats.index[-1]
-        log.info("[%s] Last candle: %s, close=%.2f",
+        log.info("[%s] Last 15m candle: %s, close=%.2f",
                  tf, feats.index[-1], last_row.get("ohlcv_btc_close", float("nan")))
 
-        # 4b. Vol prediction & decile
-        ohlc = feats[["ohlcv_btc_open", "ohlcv_btc_high",
-                       "ohlcv_btc_low", "ohlcv_btc_close"]].rename(columns={
-                           "ohlcv_btc_open": "open", "ohlcv_btc_high": "high",
-                           "ohlcv_btc_low": "low", "ohlcv_btc_close": "close",
-                       })
+        # 4b. Vol prediction & decile (sobre velas del TF, resampleadas
+        # del grid 15m; el decil usa los bounds de entrenamiento del TF)
+        ohlc15 = feats[["ohlcv_btc_open", "ohlcv_btc_high",
+                        "ohlcv_btc_low", "ohlcv_btc_close"]].rename(columns={
+                            "ohlcv_btc_open": "open", "ohlcv_btc_high": "high",
+                            "ohlcv_btc_low": "low", "ohlcv_btc_close": "close",
+                        })
+        if tf == "15m":
+            ohlc = ohlc15
+        else:
+            rule = {"1h": "1h", "4h": "4h"}[tf]
+            ohlc = ohlc15.resample(rule).agg({"open": "first", "high": "max",
+                                              "low": "min", "close": "last"}).dropna()
         vol_pred = predict_vol_ewma(ohlc, span=strat["volatility"]["ewma_span"])
         decile = vol_to_decile(vol_pred, vol_bounds[tf])
         log.info("[%s] vol_pred=%.6f -> decile=%d", tf, vol_pred, decile)
