@@ -15,8 +15,34 @@ Reporte completo del modelo Approach B reentrenado el 2026-06-12 sin
 leakage. Todo desglosado por **bucket de probabilidad calibrada** y por
 **timeframe**, en train / val / test.
 
-Semantica: 1 senal por vela (top EV), coste 0.0012, notional fijo 100 EUR.
-AUC test ~0.547 en los 3 TFs. p_iso maximo: 15m 0.613 | 1h 0.678 | 4h 1.0.
+## Semantica importante (leer antes de los numeros)
+
+**Buckets de probabilidad**: cada bucket es un **intervalo cerrado-abierto**:
+- `0.50` = `[0.50, 0.55)` (incluye 0.50, no incluye 0.55)
+- `0.55` = `[0.55, 0.57)`, `0.57` = `[0.57, 0.60)`, etc.
+
+Vista **acumulativa** (lo que opera el bot con threshold X): se enseña en
+una celda aparte como `p_iso >= X`.
+
+**Notas criticas a tener en cuenta al leer**:
+
+1. El TEST (abr 2025 - jun 2026) tiene mas regimen bajista que alcista
+   (BTC en bajada desde hace >8 meses). Lo que parece "edge en bajista"
+   puede ser sesgo de muestra. Por eso comparamos **train + val + test**
+   y al final hay walk-forward CV.
+2. Bucket `0.80` quitado: solo agrupaba ~19-60 trades en 4h, demasiado
+   ruidoso para sacar conclusiones (el "Calmar 13.9" era inestadistico).
+   El bucket maximo que mostramos es `0.75`.
+3. 15m parece volverse rentable en **lateral con p_iso >= 0.55** (87 trades,
+   win 60.9%). Hay una celda dedicada a verificarlo y discutir si conviene
+   un modelo separado por regimen.
+4. En 1h, el edge parece concentrarse en **lateral y bajista**. Como TEST
+   es muy bajista, hay que validar con train + val que esto no es sesgo.
+5. Apalancamiento: revisamos x3-x4 en 1h y rangos seguros en 4h con
+   buckets sensatos (no el 0.80 antiguo).
+
+Coste 0.0012, notional fijo 100 EUR, 1 senal por vela (top EV).
+AUC test ~0.547. p_iso maximo: 15m 0.613 | 1h 0.678 | 4h 1.0.
 """
 
 C1 = '''# Celda 1
@@ -42,8 +68,10 @@ NOTIONAL = 100.0
 TF_MIN = {"15m": 15, "1h": 60, "4h": 240}
 TFS = ["15m", "1h", "4h"]
 SPLITS = ["train", "val", "test"]
-BUCKETS = [0.50, 0.55, 0.57, 0.60, 0.62, 0.65, 0.67, 0.70, 0.75, 0.80, 1.0001]
+BUCKETS = [0.50, 0.55, 0.57, 0.60, 0.62, 0.65, 0.67, 0.70, 0.75, 1.0001]
 BUCKET_LBL = [f"{a:.2f}" for a in BUCKETS[:-1]]
+# CUM_THRESHOLDS = vista acumulativa (p_iso >= X) = como opera el bot
+CUM_THRESHOLDS = [0.50, 0.55, 0.57, 0.60, 0.62, 0.65, 0.67, 0.70]
 COLORS = {"15m": "steelblue", "1h": "darkorange", "4h": "seagreen"}
 
 sig = {}
@@ -290,15 +318,21 @@ def stats_with_L(sub, days, L):
         "eq": eq, "dd": dd,
     }
 
-# elegir mejor bucket por TF (mayor Calmar test)
+# elegir mejor bucket por TF (mayor Calmar test, n>=50 para estabilidad)
+# n>=50 evita el clasico "Calmar gigante con 19 trades" que vimos en 4h 0.80
 best = {}
 for tf in TFS:
     g = master_tbl[(master_tbl.split == "test") & (master_tbl.tf == tf)
-                   & (master_tbl.n >= 20)]
+                   & (master_tbl.n >= 50)]
+    if not len(g):
+        # fallback: relajar a n>=20 si no hay buckets con 50+
+        g = master_tbl[(master_tbl.split == "test") & (master_tbl.tf == tf)
+                       & (master_tbl.n >= 20)]
     if not len(g): continue
     g = g[~g.calmar.isin([np.inf])]
     if not len(g): continue
     best[tf] = g.sort_values("calmar", ascending=False).iloc[0].bucket
+print(f"Mejor bucket por TF (Calmar, n>=50): {best}")
 
 print()
 for tf, bk in best.items():
@@ -414,7 +448,302 @@ for ax, (tf, bk) in zip(axes, best.items()):
     ax.axhline(0, color="black", lw=0.5); ax.grid(alpha=0.3); ax.legend()
 plt.tight_layout(); plt.show()
 
-print("\\nRB16 OK")
+print("\\nRB16 OK celdas 1-8")
+'''
+
+C9 = '''# Celda 9
+# Objetivo
+# Vista ACUMULATIVA (p_iso >= X) - es como opera el bot con threshold X.
+# Aclara la pregunta "los buckets son >=0.55 o solo [0.55, 0.60)?".
+
+rows_cum = []
+for ds in sig:
+    days = max(1, (sig[ds]["timestamp"].max()
+                    - sig[ds]["timestamp"].min()).days)
+    sel = top_ev_per_candle(sig[ds])
+    for tf in TFS:
+        for thr in CUM_THRESHOLDS:
+            sub = sel[(sel.timeframe == tf) & (sel.p_win_isotonic >= thr)]
+            m = metrics(sub.net012.values, sub.dur_min.values, days)
+            if m is None: continue
+            m.update({"split": ds, "tf": tf, "thr": thr})
+            rows_cum.append(m)
+cum_tbl = pd.DataFrame(rows_cum)
+for c in ["win_rate","expectancy","PF","sharpe","calmar"]:
+    cum_tbl[c] = cum_tbl[c].round(3)
+for c in ["max_dd_eur","pnl_total","pnl_dia"]:
+    cum_tbl[c] = cum_tbl[c].round(2)
+
+print("=== Vista ACUMULATIVA (p_iso >= X) - como opera el bot ===")
+for ds in sig:
+    print(f"\\n--- {ds.upper()} ---")
+    print(cum_tbl[cum_tbl.split == ds][[
+        "tf", "thr", "n", "trades_dia", "win_rate", "expectancy",
+        "sharpe", "calmar", "max_dd_eur", "pnl_total"
+    ]].to_string(index=False))
+
+# Comparativa visual win rate acumulado por TF para los 3 splits
+fig, axes = plt.subplots(1, len(TFS), figsize=(5*len(TFS), 4), sharey=True)
+for ax, tf in zip(axes, TFS):
+    for ds in sig:
+        g = cum_tbl[(cum_tbl.tf == tf) & (cum_tbl.split == ds)]
+        ax.plot(g.thr, g.win_rate, marker="o", label=ds, lw=1.3)
+    ax.axhline(0.5, color="black", lw=0.5)
+    ax.set_title(f"{tf}: win rate vs threshold (acumulativo)")
+    ax.set_xlabel("p_iso >= X"); ax.grid(alpha=0.3); ax.legend()
+axes[0].set_ylabel("win rate")
+plt.tight_layout(); plt.show()
+'''
+
+C10 = '''# Celda 10
+# Objetivo
+# Regimen de tendencia comparando train + val + test. Si la "ventaja en
+# bajista de 1h" se mantiene en train (mucha mas variedad de regimenes),
+# es real; si solo aparece en test, es sesgo del periodo bajista actual.
+
+rows_all = []
+for ds in sig:
+    days_s = max(1, (sig[ds]["timestamp"].max()
+                      - sig[ds]["timestamp"].min()).days)
+    sel = annotate_regime(top_ev_per_candle(sig[ds]))
+    for tf in TFS:
+        for reg in ["alcista", "bajista", "lateral"]:
+            for thr in [0.55, 0.60, 0.65]:
+                sub = sel[(sel.timeframe == tf) & (sel.regimen == reg)
+                           & (sel.p_win_isotonic >= thr)]
+                m = metrics(sub.net012.values, sub.dur_min.values, days_s)
+                if m is None: continue
+                m.update({"split": ds, "tf": tf, "regimen": reg, "thr": thr})
+                rows_all.append(m)
+reg_tbl = pd.DataFrame(rows_all)
+for c in ["win_rate", "expectancy", "sharpe"]:
+    reg_tbl[c] = reg_tbl[c].round(3)
+for c in ["max_dd_eur", "pnl_total"]:
+    reg_tbl[c] = reg_tbl[c].round(2)
+
+print("=== Regimen TF/threshold en TRAIN/VAL/TEST ===")
+print("(busca: si VAL+TRAIN no confirman lo que VES en TEST, es sesgo)\\n")
+print(reg_tbl[["split","tf","regimen","thr","n","win_rate","expectancy",
+                "sharpe","pnl_total","max_dd_eur"]].to_string(index=False))
+
+# Heatmap simple: win_rate por (tf+regimen) en cada split, threshold 0.55
+fig, axes = plt.subplots(1, len(sig), figsize=(4.5*len(sig), 4), sharey=True)
+for ax, ds in zip(axes, sig.keys()):
+    g = reg_tbl[(reg_tbl.split == ds) & (reg_tbl.thr == 0.55)]
+    if not len(g):
+        ax.set_title(f"{ds}: sin datos thr 0.55"); ax.axis("off"); continue
+    piv = g.pivot_table(index="tf", columns="regimen", values="win_rate")
+    piv = piv.reindex(index=TFS, columns=["alcista","lateral","bajista"])
+    im = ax.imshow(piv.values, cmap="RdYlGn", vmin=0.45, vmax=0.7, aspect="auto")
+    ax.set_xticks(range(3)); ax.set_xticklabels(piv.columns)
+    ax.set_yticks(range(len(TFS))); ax.set_yticklabels(piv.index)
+    ax.set_title(f"{ds}: win rate (thr 0.55)")
+    for i in range(piv.shape[0]):
+        for j in range(piv.shape[1]):
+            v = piv.values[i, j]
+            if not np.isnan(v):
+                ax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                        color="black", fontsize=10)
+    plt.colorbar(im, ax=ax, shrink=0.7)
+plt.suptitle("Win rate por TF x regimen (heatmap, thr 0.55, p_iso >= 0.55)",
+             y=1.02)
+plt.tight_layout(); plt.show()
+
+print("\\nLectura: si una celda esta verde en TEST pero amarilla/roja")
+print("en TRAIN y VAL -> sesgo. Si la celda esta verde en los 3 splits ->")
+print("efecto real.")
+'''
+
+C11 = '''# Celda 11
+# Objetivo
+# Foco en el caso 15m lateral. Investigar si el edge observado en test
+# (87 trades, +11 EUR, win 60.9%) se sostiene en train y val.
+
+print("=== Foco: 15m EN LATERAL, thr 0.55 (p_iso >= 0.55) ===\\n")
+for ds in sig:
+    days_s = max(1, (sig[ds]["timestamp"].max()
+                      - sig[ds]["timestamp"].min()).days)
+    sel = annotate_regime(top_ev_per_candle(sig[ds]))
+    sub = sel[(sel.timeframe == "15m") & (sel.regimen == "lateral")
+               & (sel.p_win_isotonic >= 0.55)]
+    if len(sub) < 5:
+        print(f"{ds}: sin datos"); continue
+    m = metrics(sub.net012.values, sub.dur_min.values, days_s)
+    print(f"{ds}: n={m['n']:4d} | win {m['win_rate']:.3f} | "
+          f"exp {m['expectancy']:+.4f} | sharpe {m['sharpe']:+.2f} | "
+          f"PnL {m['pnl_total']:+.1f} EUR | maxDD {m['max_dd_eur']:+.1f}")
+
+# Distribucion: cuanto tiempo pasamos en cada regimen, por split
+# (sirve para entender el sesgo)
+print("\\n=== Distribucion de regimen por split (horas) ===")
+sel_reg = annotate_regime(top_ev_per_candle(sig.get("test")))
+for ds in sig:
+    sel = annotate_regime(top_ev_per_candle(sig[ds]))
+    dist = sel.groupby("regimen")["timestamp"].count() / len(sel) * 100
+    print(f"{ds}: {dist.round(1).to_dict()}")
+
+print()
+print("Si en TRAIN+VAL el edge 15m lateral se mantiene -> entrenar un")
+print("clasificador de regimen + 3 modelos (uno por regimen) puede valer.")
+print("Si solo aparece en TEST con 87 trades -> NO concluyente todavia.")
+
+# Equity 15m thr 0.55 por regimen, los 3 splits
+fig, axes = plt.subplots(1, len(sig), figsize=(5*len(sig), 4))
+if len(sig) == 1: axes = [axes]
+for ax, ds in zip(axes, sig.keys()):
+    sel = annotate_regime(top_ev_per_candle(sig[ds]))
+    sub = sel[(sel.timeframe == "15m") & (sel.p_win_isotonic >= 0.55)]
+    for reg, color in [("alcista", "seagreen"), ("lateral", "grey"),
+                        ("bajista", "firebrick")]:
+        g = sub[sub.regimen == reg].sort_values("timestamp")
+        if len(g) < 5: continue
+        eq = (g.net012.values * NOTIONAL).cumsum()
+        ax.plot(g.timestamp, eq, label=f"{reg} (n={len(g)})", color=color,
+                lw=1.1)
+    ax.set_title(f"15m thr 0.55 - {ds}")
+    ax.axhline(0, color="black", lw=0.5); ax.grid(alpha=0.3); ax.legend()
+plt.tight_layout(); plt.show()
+'''
+
+C12 = '''# Celda 12
+# Objetivo
+# Walk-forward CV (series temporales). Particiona TODO el periodo
+# (train+val+test) en N ventanas consecutivas y mide el edge por TF y
+# threshold en cada ventana. Si la ventaja se mantiene en MAS ventanas
+# que la moneda al aire, es real. Si solo aparece en 1-2 ventanas
+# concretas (las recientes), es sesgo del periodo.
+
+# Unir los tres splits
+union = pd.concat([sig["train"], sig["val"], sig["test"]],
+                   ignore_index=True)
+union["timestamp"] = pd.to_datetime(union["timestamp"])
+union = union.sort_values("timestamp")
+N_FOLDS = 10
+fold_edges = pd.qcut(union["timestamp"].astype("int64"), N_FOLDS,
+                      labels=False, duplicates="drop")
+union["fold"] = fold_edges
+
+# Para cada (tf, threshold), expectancy por fold
+print(f"=== Walk-forward {N_FOLDS} ventanas (sobre union train+val+test) ===")
+print(f"Cada fold cubre ~{(union.timestamp.max()-union.timestamp.min()).days // N_FOLDS} dias")
+print()
+fold_dates = (union.groupby("fold")["timestamp"]
+              .agg(["min", "max"]).round("D"))
+print("Rangos de cada fold:")
+print(fold_dates.to_string())
+print()
+
+rows_w = []
+for tf in TFS:
+    for thr in [0.55, 0.60, 0.65]:
+        for fold in range(N_FOLDS):
+            sub_fold = union[union.fold == fold]
+            sel = top_ev_per_candle(sub_fold)
+            sub = sel[(sel.timeframe == tf) & (sel.p_win_isotonic >= thr)]
+            if len(sub) < 10: continue
+            nr = sub.net012.values
+            rows_w.append({"tf": tf, "thr": thr, "fold": int(fold),
+                           "n": len(sub),
+                           "win_rate": round((nr > 0).mean(), 3),
+                           "expectancy": round(nr.mean(), 5),
+                           "pnl_total": round((nr * NOTIONAL).sum(), 2)})
+wf = pd.DataFrame(rows_w)
+
+# Resumen: % de folds rentables por (tf, thr)
+print("=== % folds con expectancy > 0 (estabilidad del edge) ===")
+summary = []
+for tf in TFS:
+    for thr in [0.55, 0.60, 0.65]:
+        g = wf[(wf.tf == tf) & (wf.thr == thr)]
+        if not len(g): continue
+        summary.append({"tf": tf, "thr": thr, "n_folds": len(g),
+                         "pct_rentable": round((g.expectancy > 0).mean()*100, 0),
+                         "exp_media": round(g.expectancy.mean(), 5),
+                         "exp_std": round(g.expectancy.std(), 5)})
+sm = pd.DataFrame(summary)
+print(sm.to_string(index=False))
+
+# Grafica: expectancy por fold en cada (tf, thr)
+fig, axes = plt.subplots(len(TFS), 1, figsize=(13, 3.5*len(TFS)),
+                         sharex=True)
+for ax, tf in zip(axes, TFS):
+    for thr in [0.55, 0.60, 0.65]:
+        g = wf[(wf.tf == tf) & (wf.thr == thr)].sort_values("fold")
+        ax.plot(g.fold, g.expectancy, marker="o",
+                label=f"thr {thr}", lw=1.3)
+    ax.axhline(0, color="black", lw=0.5)
+    ax.set_title(f"{tf}: expectancy por fold (walk-forward)")
+    ax.set_ylabel("expectancy"); ax.grid(alpha=0.3); ax.legend()
+axes[-1].set_xlabel("fold (cronologico)")
+plt.tight_layout(); plt.show()
+
+print("\\nLectura: una linea por encima de 0 en la MAYORIA de folds")
+print("indica edge estable. Una linea que cae a negativo en folds")
+print("recientes pero positiva antes -> el modelo se ha degradado en")
+print("el ultimo periodo (o el regimen reciente le sienta mal).")
+'''
+
+C13 = '''# Celda 13
+# Objetivo
+# Apalancamiento concreto para casos sensatos:
+#   - 1h con thr 0.55-0.60, L = 3 y L = 4
+#   - 4h con thr 0.55-0.65, L = 2, 3, 5
+# Con notional fijo todo escala lineal en L; mostramos riesgos absolutos.
+
+FUNDING_8H = 0.0001
+casos = [("1h", 0.55, [1, 2, 3, 4]),
+         ("1h", 0.60, [1, 2, 3, 4]),
+         ("4h", 0.55, [1, 2, 3, 5]),
+         ("4h", 0.60, [1, 2, 3, 5]),
+         ("4h", 0.65, [1, 2, 3, 5])]
+
+sel_test = top_ev_per_candle(sig["test"])
+days_test = max(1, (sig["test"]["timestamp"].max()
+                    - sig["test"]["timestamp"].min()).days)
+print(f"=== Apalancamiento por threshold (TEST, {days_test} dias) ===")
+print(f"{'tf':>4} {'thr':>5} {'L':>3} {'trades':>7} "
+      f"{'PnL anyo':>10} {'fund anyo':>10} {'maxDD EUR':>10} "
+      f"{'Calmar':>7} {'L safe':>7}")
+for tf, thr, Ls in casos:
+    sub = sel_test[(sel_test.timeframe == tf)
+                    & (sel_test.p_win_isotonic >= thr)]
+    if len(sub) < 10:
+        print(f"{tf:>4} {thr:>5.2f}: pocos trades ({len(sub)})"); continue
+    pnl_unit = sub.net012.values * NOTIONAL
+    fund_unit = sub.dur_min.values / 60 / 8 * FUNDING_8H * NOTIONAL
+    max_sl = sub.sl_pct.max()
+    L_safe = round(1.0 / (3 * max_sl + 0.005), 1)
+    for L in Ls:
+        pnl = pnl_unit * L - fund_unit * L
+        eq = np.cumsum(pnl)
+        peak = np.maximum.accumulate(eq)
+        dd = (eq - peak).min()
+        pnl_anyo = pnl.sum() * 365 / days_test
+        fund_anyo = -fund_unit.sum() * L * 365 / days_test
+        calmar = pnl_anyo / abs(dd) if dd < 0 else np.inf
+        print(f"{tf:>4} {thr:>5.2f} {L:>3} {len(sub):>7} "
+              f"{pnl_anyo:>+10.1f} {fund_anyo:>+10.2f} {dd:>+10.1f} "
+              f"{calmar:>7.2f} {L_safe:>7.1f}")
+    print()
+
+# Grafica equity de los casos clave
+fig, axes = plt.subplots(2, 2, figsize=(13, 8))
+configs = [("1h", 0.55), ("1h", 0.60), ("4h", 0.55), ("4h", 0.65)]
+for ax, (tf, thr) in zip(axes.flat, configs):
+    sub = sel_test[(sel_test.timeframe == tf)
+                    & (sel_test.p_win_isotonic >= thr)].sort_values("timestamp")
+    if len(sub) < 10:
+        ax.set_title(f"{tf} thr {thr}: pocos trades"); continue
+    pnl_unit = sub.net012.values * NOTIONAL
+    fund_unit = sub.dur_min.values / 60 / 8 * FUNDING_8H * NOTIONAL
+    for L in [1, 2, 3, 5]:
+        eq = np.cumsum(pnl_unit * L - fund_unit * L)
+        ax.plot(sub.timestamp, eq, label=f"L={L}", lw=1.1)
+    ax.set_title(f"{tf} thr {thr} (n={len(sub)}): equity apalancada")
+    ax.axhline(0, color="black", lw=0.5)
+    ax.grid(alpha=0.3); ax.legend(fontsize=8)
+plt.tight_layout(); plt.show()
+print("\\nRB16 OK celdas 9-13")
 '''
 
 nb = {"cells": [], "metadata": {
@@ -424,7 +753,8 @@ nb = {"cells": [], "metadata": {
     "colab": {"provenance": []}}, "nbformat": 4, "nbformat_minor": 5}
 for kind, src in [("markdown", MD0), ("code", C1), ("code", C2),
                   ("code", C3), ("code", C4), ("code", C5), ("code", C6),
-                  ("code", C7), ("code", C8)]:
+                  ("code", C7), ("code", C8), ("code", C9), ("code", C10),
+                  ("code", C11), ("code", C12), ("code", C13)]:
     nb["cells"].append({"cell_type": kind, "metadata": {},
                         "source": src.splitlines(keepends=True),
                         **({"outputs": [], "execution_count": None}
