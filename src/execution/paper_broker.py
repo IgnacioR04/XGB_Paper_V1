@@ -69,7 +69,9 @@ def open_position(state_dir: Path,
                   candidate_id: int,
                   entry_price_quality: str = "ticker",
                   ideal_entry_price: float | None = None,
-                  vol_decile: int | None = None) -> dict[str, Any]:
+                  vol_decile: int | None = None,
+                  leverage: float = 1.0,
+                  regime: str = "") -> dict[str, Any]:
     pos_id = uuid.uuid4().hex[:12]
     now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
     pos: dict[str, Any] = {
@@ -86,6 +88,8 @@ def open_position(state_dir: Path,
         "sl_price": float(sl_price),
         "timeout_time": timeout_time.isoformat() if isinstance(timeout_time, dt.datetime) else timeout_time,
         "notional_eur": float(notional_eur),
+        "leverage": float(leverage),
+        "regime": regime,
         "p_win": float(p_win),
         "EV_pred": float(EV_pred),
         "candidate_id": int(candidate_id),

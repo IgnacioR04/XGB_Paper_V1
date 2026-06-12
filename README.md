@@ -1,238 +1,119 @@
-# XGB Paper Trader (BTC v1)
+# XGB Paper Trader v2 — Regime-Aware BTC Bot
 
-Paper-trading bot para Bitcoin sobre el modelo Approach B (XGBoost sobre
-`label_win`, calibracion isotonic, candidatos `barriers_v2`, seleccion
-`top_EV_per_timeframe`).
+Paper-trading bot para Bitcoin usando XGBoost Approach B (calibracion isotonic + candidatos barriers_v2 + seleccion top_EV) con **reglas condicionales por regimen de mercado y apalancamiento variable**.
 
 ## Que hace
 
 Cada 5 minutos (cron de GitHub Actions) el bot:
 
-1. Detecta que timeframes (`15m`, `1h`, `4h`) tienen una vela cerrada lista
-   para procesar (`closed_candle_only`).
-2. Monitorea las posiciones abiertas y cierra por TP / SL / TIMEOUT.
+1. Detecta que timeframes (`15m`, `1h`, `4h`) tienen una vela cerrada.
+2. Cierra posiciones abiertas por TP / SL / TIMEOUT.
 3. Para cada TF due:
-   - Descarga klines spot + futures de Binance (publico, sin key).
-   - Construye features live (OHLCV, returns, TA, lags, rolling, calendar).
-   - Combina con cache externa (macro, on-chain, sentiment, cross-crypto)
-     que se actualiza por otro workflow cada 6 horas.
-   - Estima volatilidad (EWMA del true range) y mapea a decile.
-   - Carga la libreria de candidatos de ese decile.
-   - Inferencia XGBoost + calibrador isotonic -> `p_win_calibrated`.
-   - Calcula EV usando `coste round-trip = 0.0012`.
-   - Filtra por la banda de probabilidad del TF y elige el mejor por EV.
-   - Si pasa el filtro y no hay posicion abierta en esa cartera -> abre.
+   - Construye features live (615 features del grid 15m).
+   - Estima volatilidad EWMA y mapea a decile.
+   - **Clasifica el regimen de mercado** (alcista/bajista/lateral).
+   - Si el regimen NO esta habilitado para ese TF, salta.
+   - Si esta habilitado: usa el threshold y leverage del regimen.
+   - Inferencia XGB + calibrador isotonic -> filtra por threshold -> top EV.
+   - Si pasa y la cartera esta libre -> abre con `notional = cash * leverage`.
 
-Cada timeframe tiene su PROPIA cartera de **100 EUR**. Las carteras son
-independientes y un trade en `15m` no afecta a `1h` ni `4h`.
+Cada TF tiene su propia cartera de **100 EUR**.
+
+## Clasificacion de regimen
+
+Se usan EMA50 y EMA200 sobre el cierre de 1h (resampleado del grid 15m):
+
+| Regimen | Condicion |
+|---------|-----------|
+| **Alcista** | close > EMA200 AND EMA50 > EMA200 |
+| **Bajista** | close < EMA200 AND EMA50 < EMA200 |
+| **Lateral** | todo lo demas |
+
+Las EMAs son indicadores rezagados — solo usan datos hasta t. El regimen clasificado en t se aplica a la decision de t+1 sin leakage.
+
+## Reglas por regimen y timeframe (v2)
+
+| TF | Regimen | Threshold p_win | Leverage | Opera? |
+|----|---------|----------------|----------|--------|
+| 15m | Lateral | 0.55 | 1x | Si |
+| 15m | Alcista/Bajista | — | — | No |
+| 1h | Bajista | 0.55 | 2x | Si |
+| 1h | Lateral | 0.55 | 4x | Si |
+| 1h | Alcista | — | — | No |
+| 4h | Alcista | 0.55 | 2x | Si |
+| 4h | Bajista | 0.75 | 5x | Si |
+| 4h | Lateral | 0.55 | 2x | Si |
+
+Editables en [config/paper_trading.yaml](config/paper_trading.yaml).
+
+## Leverage
+
+El apalancamiento se aplica al notional: `notional_eur = cash_eur * leverage`. El PnL se amplifica automaticamente porque `pnl = notional * return`. Con leverage > 1x, una perdida puede superar el cash disponible (drawdown >100%).
 
 ## Semantica temporal: vela t -> ejecucion en t+1
-
-El estandar profesional (y el que uso el backtest de entrenamiento):
 
 ```
 |---- vela t ----|---- vela t+1 ----|
                  ^
                  cierre de t = apertura de t+1
                  AQUI se pregunta al modelo (features = vela t CERRADA)
-                 y AQUI MISMO se ejecuta la entrada (apertura de t+1)
+                 y AQUI MISMO se ejecuta la entrada
 ```
-
-- En velas de 15m: la vela 11:30-11:45 cierra a las 11:45. En ese momento
-  el bot construye las features con esa vela cerrada, pregunta al modelo, y
-  si pasa los filtros entra a precio de mercado al inicio de la vela
-  11:45-12:00 (unos segundos despues de las 11:45).
-- Igual para 1h (al cierre de cada hora) y 4h (al cierre de cada bloque de
-  4h UTC: 00, 04, 08, 12, 16, 20).
 
 **Nunca se decide con la vela en curso** (`signal_mode: closed_candle_only`).
 
-Cada pregunta al modelo queda registrada en
-`data/logs/decisions/decisions_YYYY-MM.csv` con columnas explicitas:
-`candle_open_time` (apertura de t), `candle_close_time` (cierre de t =
-momento de la pregunta), `execution_candle_open` (apertura de t+1 =
-momento de ejecucion), `decision` (YES/NO), motivo, y datos del candidato
-elegido si fue YES. El dashboard la muestra en "Historial de senales".
-
-## Bandas de probabilidad por timeframe
-
-| TF  | Banda `p_win_calibrated` |
-|-----|--------------------------|
-| 15m | `0.65 <= p < 0.70`       |
-| 1h  | `0.70 <= p < 0.75`       |
-| 4h  | `0.65 <= p < 0.70`       |
-
-Editables en [config/paper_trading.yaml](config/paper_trading.yaml). Hay un
-flag `allow_above_band` (default `false`) que abre la banda por arriba si lo
-activas.
-
 ## Coste round-trip
 
-`0.06% entrada + 0.06% salida = 0.12% total`. Define la formula de EV:
+`0.06% entrada + 0.06% salida = 0.12% total`.
 
 ```
 EV_pred = p_win * tp_pct - (1 - p_win) * sl_pct - 0.0012
-```
-
-## Estructura del repo
-
-```
-XGB_Paper_V1/
-  artifacts/        # modelos XGB, calibrador, libreria de candidatos, schemas
-  config/           # 3 YAMLs editables
-  src/              # codigo Python
-    data/           # extractores Binance / Yahoo / FRED / etc
-    features/       # builders en vivo
-    models/         # loader + calibrador + inferencia
-    strategy/       # candidates, EV, signal engine
-    execution/      # paper broker, position manager, exits
-    portfolio/      # carteras y accounting
-    dashboard/      # exporter de JSON
-    utils/          # tiempo, IO, http, logging
-  scripts/          # entrypoints
-  tests/            # pytest
-  dashboard/        # HTML + Chart.js
-  data/             # estado runtime (ignorado por git; se commitea desde Actions)
-  .github/workflows/
 ```
 
 ## Cron jobs (GitHub Actions)
 
 | Workflow | Cron | Que hace |
 |----------|------|----------|
-| `paper_trader.yml` | `*/5 * * * *` | Tick: decide y abre/cierra trades |
-| `external_update.yml` | `5 */6 * * *` | Refresca macro/onchain/sentiment/funding |
-| `pages.yml` | tras `paper_trader` ok | Despliega el dashboard a GitHub Pages |
-| `tests.yml` | push & PR | Corre pytest |
+| `paper_trader.yml` | `*/5 * * * *` | Tick: clasifica regimen, decide, abre/cierra trades |
+| `external_update.yml` | `5 */6 * * *` | Refresca macro/onchain/sentiment/funding cache |
+| `pages.yml` | tras paper_trader ok | Despliega dashboard a GitHub Pages |
+| `tests.yml` | push & PR | pytest |
 
-**Por que un cron separado para datos externos?** Las APIs de macro (Yahoo,
-FRED) y on-chain (Blockchain.com) no cambian cada 5 minutos. Refrescarlas
-en cada tick desperdicia tiempo y rate limit. El cache se commitea al repo
-y el tick lo lee.
+## Dashboard
 
-> Si necesitas un cron diferente al de Actions (ej. una maquina propia
-> 24/7 para evitar los retrasos tipicos de GitHub), [scripts/run_paper_tick.py](scripts/run_paper_tick.py)
-> es el unico entrypoint y se puede llamar desde cualquier scheduler externo.
+URL: `https://ignacior04.github.io/XGB_Paper_V1/`
+
+Muestra: grafica BTC en tiempo real, graficas por TF con trades, equity por cartera, historial de senales, posiciones abiertas y trades cerrados.
 
 ## Como ejecutar localmente
 
 ```bash
-# 1. Crear entorno
-python -m venv .venv
-source .venv/bin/activate    # en Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# 2. (opcional) Copiar .env.example -> .env y rellenar FRED_API_KEY
-
-# 3. Verificar que estan todos los artifacts
-python scripts/audit_artifacts.py
-
-# 4. Refrescar cache de fuentes externas (una vez al dia minimo)
-python scripts/update_external_data.py
-
-# 5. Dry-run (no abre operaciones, solo loguea decisiones)
-python scripts/run_paper_tick.py --dry-run
-
-# 6. Tick real
-python scripts/run_paper_tick.py
-
-# 7. Forzar TFs concretos ignorando ventana de scheduler
-python scripts/run_paper_tick.py --force-tf 15m,1h
+python scripts/audit_artifacts.py          # verifica artifacts
+python scripts/update_external_data.py     # cache externa
+python scripts/run_paper_tick.py --dry-run # sin abrir posiciones
+python scripts/run_paper_tick.py           # tick real
+python scripts/run_paper_tick.py --force-tf 15m,1h,4h  # forzar TFs
 ```
 
-## Ver el dashboard
+## Modelo: 615 features
 
-URL: `https://ignacior04.github.io/XGB_Paper_V1/` (GitHub Pages, se
-redespliega tras cada tick exitoso).
+- 10 candidate-level: `vol_pred`, `vol_decile`, `tp_mult`, `sl_mult`, `H`, `tp_pct`, `sl_pct`, `side_long`, `barrier_quality_score`, `p_break_even`.
+- 605 market features del grid 15m (prefijos `ohlcv_`, `ret_`, `ta_`, `lag_`, `roll_`, `cal_`, `der_`, `vp_`, `ext_`, `macro_`, `cx_`, `oc_`, `sent_`, `reg_`, `inter_`).
+- ~310/605 features se computan en live con paridad <1% vs master causal. El resto quedan NaN (XGBoost las tolera).
 
-Que muestra:
-- **Grafica de BTC en tiempo real** (velas 1m, refresco cada 5s). Las velas
-  se piden desde TU navegador a Binance (tu IP no esta bloqueada); si
-  fallara, cae a Coinbase automaticamente.
-- **Una grafica por estrategia** (15m / 1h / 4h) con varitas de su
-  timeframe y marcadores de trades: triangulo verde hacia arriba bajo la
-  vela = entrada long; triangulo rojo hacia abajo sobre la vela = entrada
-  short; circulo = salida con su PnL.
-- **Equity** por cartera.
-- **Historial de senales**: cada pregunta al modelo (la fila verde = abrio).
-- **Posiciones abiertas** y **trades cerrados**.
+## Relacion con el proyecto de investigacion
 
-Local: abrir `dashboard/index.html` con un servidor estatico
-(`python -m http.server` en la carpeta dashboard/) tras correr un tick.
+Los modelos, datasets (8.8 anos, 308K velas, 646 columnas) y notebooks de investigacion viven en Google Drive (`Base de Datos BITCOIN/`). Este repo es el sistema de despliegue. Los artifacts se generan en Drive y se copian aqui.
 
-## Modelo y artifacts
+## Estado del modelo (2026-06-12)
 
-Los artifacts pequenos viven dentro del repo:
+AUC honesto post-fix leakage causal: ~0.55 (antes 0.69-0.77 inflado). La estrategia v2 usa regimen condicional para concentrar las operaciones donde el modelo tiene mas edge, con leverage variable para amplificar.
 
-- `artifacts/models/approach_B_xgb_{15m,1h,4h}.json` (~1.3 MB cada uno)
-- `artifacts/calibration/calib_approach_B_compact.json` (31 KB, isotonic
-  reconstruido desde los `x_thresholds/y_thresholds` por TF)
-- `artifacts/candidates/barrier_candidate_library_{tf}.parquet` (~50 KB cada uno)
-- `artifacts/schemas/feature_schema.json` (615 features en orden)
-- `artifacts/schemas/vol_decile_bounds.json` (rangos para mapear vol a decile)
+## Historial de versiones
 
-El modelo final usa **615 features**:
-
-- 10 candidate-level: `vol_pred`, `vol_decile`, `tp_mult`, `sl_mult`, `H`,
-  `tp_pct`, `sl_pct`, `side_long`, `barrier_quality_score`, `p_break_even`.
-- 605 market features: prefijos `ohlcv_`, `ret_`, `ta_`, `lag_`, `roll_`,
-  `cal_`, `der_`, `vp_`, `ext_`, `macro_`, `cx_`, `oc_`, `sent_`, `reg_`,
-  `inter_`.
-
-## Cobertura honesta de features en live
-
-El feature builder live (`src/features/live_feature_builder.py`) calcula
-de forma fidedigna:
-
-- `ohlcv_*`, `ret_*`, `ta_*` (subset: RSI, EMA, SMA, ATR, BB, MACD, StochRSI),
-  `cal_*`, `lag_*`, `roll_*` (subset sobre las columnas mas importantes),
-  `inter_*` (parcial), spread spot-perp, ratios cross-asset.
-- `ext_*`, `macro_*`, `cx_*`, `oc_*`, `sent_*`, `der_funding_*` desde la
-  cache externa (refrescada cada 6h).
-
-Lo que aun queda en NaN (XGBoost lo maneja):
-
-- `vp_*` (Volume Profile - requiere aggTrades streaming).
-- Algunos `ta_*` avanzados (Ichimoku, Fibonacci completo).
-- `reg_*` (regime flags - requeririan portar el modulo M11 del pipeline
-  original).
-- `roll_*` de columnas externas (macro/onchain).
-
-El log incluye un contador `n_missing` por tick para que sea visible.
-
-## Como activar el bot en GitHub Actions
-
-1. Push del repo a GitHub.
-2. Settings -> Secrets -> Actions -> New secret `FRED_API_KEY` (opcional;
-   sin esta key las series FRED quedan NaN, el modelo tolera NaN).
-3. El cron `*/5` arranca solo. Para forzar un tick: Actions -> paper_trader
-   -> Run workflow.
-4. Para evitar costes de minutos cuando estes lejos, deshabilita el cron
-   comentandolo en `.github/workflows/paper_trader.yml`.
-
-## Como pasar de paper a live (futuro)
-
-`config/paper_trading.yaml -> execution_market`:
-
-- `paper_synthetic` (actual): shorts simulados; sin Binance keys.
-- `spot_long_only`: solo longs reales en Binance Spot. Pendiente de
-  implementar `src/execution/binance_broker.py`.
-- `futures`: longs y shorts en USDM Futures. Mismo TODO.
-
-Cuando llegue ese momento, configurar Binance API keys como secrets y
-sustituir `paper_broker` por `binance_broker` en `run_paper_tick.py`.
-
-## Lo que falta o queda como TODO
-
-Documentado en [TODO.md](TODO.md) (si existe) o como comentarios `# TODO:`
-en el codigo. Los principales:
-
-1. **Volume Profile (`vp_*`)** - requiere consumo de aggTrades de Binance,
-   probablemente via WebSocket. Para v1 estos features quedan en NaN.
-2. **Regime features (`reg_*`)** - portar el notebook `T11_regime.ipynb`
-   al builder live.
-3. **Volatility model real** - usamos EWMA del true range como proxy; el
-   pipeline original usa `lgbm`/`xgb`. Si esos modelos estan exportados,
-   reemplazar `src/volatility/ewma_vol.py`.
-4. **Open Interest y Long/Short ratio** - endpoints existen en
-   `binance_futures.py` pero no se integran al feature row aun.
+| Version | Fecha | Cambios |
+|---------|-------|---------|
+| v1 | 2026-06-08 | Bandas de probabilidad fijas por TF (0.55-0.67) |
+| v1.1 | 2026-06-12 | Fix leakage causal (chikou, swings, cx_daily). AUC cae a 0.55 |
+| **v2** | **2026-06-12** | **Regimen condicional + leverage variable. Reset de carteras a 100 EUR** |

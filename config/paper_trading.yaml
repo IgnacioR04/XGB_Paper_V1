@@ -1,13 +1,13 @@
 # ============================================================
-# Paper trading config - XGB_Paper_V1
+# Paper trading config - XGB_Paper_V1 (v2 regime-aware)
 # ============================================================
 
-version: "paper_v1"
-mode: "paper"                       # paper | live (live no implementado)
-execution_market: "paper_synthetic"  # paper_synthetic | spot_long_only | futures
+version: "paper_v2_regime"
+mode: "paper"
+execution_market: "paper_synthetic"
 
 # ---------------------------------------------------------------
-# Carteras independientes - 100 EUR cada una
+# Carteras independientes - 100 EUR cada una (reseteadas v2)
 # ---------------------------------------------------------------
 wallets:
   "15m":
@@ -24,30 +24,53 @@ allow_cross_timeframe_positions: true
 max_positions_per_wallet: 1
 
 # ---------------------------------------------------------------
-# Bandas de probabilidad calibrada (p_win_isotonic)
-# Regla por defecto: min <= p_win < max  (cerrada por abajo, abierta arriba)
+# Reglas por regimen y timeframe (v2)
+#
+# Regimen se clasifica con EMA50 vs EMA200 en 1h:
+#   alcista: close > EMA200 AND EMA50 > EMA200
+#   bajista: close < EMA200 AND EMA50 < EMA200
+#   lateral: todo lo demas
+#
+# Solo se opera en las combinaciones listadas. Las demas se ignoran.
+# threshold = p_win_calibrated minimo para operar
+# leverage = apalancamiento sobre el cash disponible
 # ---------------------------------------------------------------
-# Threshold 0.67 elegido tras el reentrenamiento causal (2026-06-12):
-# se opera todo candidato con p_win_isotonic >= 0.67 (sin tope superior,
-# la expectancy crece monotonamente con p_win en el modelo causal)
-probability_bands:
+regime_rules:
   "15m":
-    min: 0.55          # bajado 2026-06-12: con 0.67 nunca opera (p_iso max 0.613);
-    max: 1.0           # OJO: a 0.55 el test dio -0.016 EUR/dia (observacion paper)
+    lateral:
+      enabled: true
+      threshold: 0.55
+      leverage: 1.0
   "1h":
-    min: 0.67
-    max: 1.0
+    bajista:
+      enabled: true
+      threshold: 0.55
+      leverage: 2.0
+    lateral:
+      enabled: true
+      threshold: 0.55
+      leverage: 4.0
   "4h":
-    min: 0.67
-    max: 1.0
+    alcista:
+      enabled: true
+      threshold: 0.55
+      leverage: 2.0
+    bajista:
+      enabled: true
+      threshold: 0.75
+      leverage: 5.0
+    lateral:
+      enabled: true
+      threshold: 0.55
+      leverage: 2.0
 
-# Si true: filtra solo por p_win >= min (banda abierta arriba)
+# Banda abierta por arriba (opera todo candidato con p >= threshold)
 allow_above_band: true
-# Si true: rechaza candidatos con EV_pred <= 0 incluso si caen en la banda
+# No requiere EV positivo (el threshold ya filtra)
 require_positive_ev: false
 
 # ---------------------------------------------------------------
-# Costes (round-trip)
+# Costes (round-trip, sin cambios)
 # ---------------------------------------------------------------
 costs:
   fee_in: 0.0006
@@ -56,14 +79,9 @@ costs:
 
 # ---------------------------------------------------------------
 # Modo de senal
-# closed_candle_only: solo decidir sobre vela cerrada (default)
-# preclose_preview:   solo guarda preview, NO abre operaciones
 # ---------------------------------------------------------------
 signal_mode: "closed_candle_only"
-
-# Politica de seleccion de candidato dentro de cada timeframe
 selection_policy: "top_EV_per_timeframe"
-# Sides permitidos (paper_synthetic acepta ambos)
 allowed_sides: ["long", "short"]
 
 # ---------------------------------------------------------------
@@ -71,33 +89,20 @@ allowed_sides: ["long", "short"]
 # ---------------------------------------------------------------
 scheduler:
   run_every_minutes: 5
-  # Cuanto despues del cierre real de vela podemos confiar en que Binance
-  # tiene la vela disponible (segundos)
   candle_close_delay_seconds:
     "15m": 20
     "1h": 30
     "4h": 60
-  # Maximo retraso aceptable desde el cierre de vela para procesar
-  # GitHub Actions suele arrancar 5-10 min tarde, asi que estos valores
-  # estan ajustados a "todavia es la vela actual" o un poco mas
   max_late_minutes:
-    "15m": 12         # casi toda la vela siguiente sigue siendo valido
-    "1h": 45          # 3/4 de la vela siguiente
-    "4h": 180         # 3/4 de la vela siguiente
+    "15m": 12
+    "1h": 45
+    "4h": 180
 
 # ---------------------------------------------------------------
-# Modo de features
-# live_recompute:           extractores + builders rebuild features (default)
-# latest_master_snapshot:   leer master_15m_latest.parquet (local/Colab)
+# Feature mode
 # ---------------------------------------------------------------
 feature_mode: "live_recompute"
-external_artifacts_path: ""   # opcional: ruta extra para artifacts pesados
-
-# ---------------------------------------------------------------
-# Politica de NaN en inferencia
-# require_all: rechaza inferencia si falta alguna feature critica
-# tolerate:    permite NaN, XGBoost lo maneja nativamente
-# ---------------------------------------------------------------
+external_artifacts_path: ""
 feature_nan_policy: "tolerate"
 
 # ---------------------------------------------------------------

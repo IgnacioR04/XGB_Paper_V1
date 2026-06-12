@@ -34,6 +34,7 @@ from src.execution import exits as exits_mod
 from src.execution import paper_broker
 from src.features.live_feature_builder import build_live_features
 from src.features.macro_cache import load_cache, to_feature_dict
+from src.features.regime import classify_regime
 from src.portfolio import wallet as wallet_mod
 from src.strategy.signal_engine import evaluate_timeframe
 from src.utils.csv_logger import append_decision, append_features
@@ -205,8 +206,42 @@ def run_tick(cfg, args) -> int:
         except Exception as e:
             log.warning("[%s] Could not append features CSV: %s", tf, e)
 
-        # 4c. Senal
-        band = paper["probability_bands"][tf]
+        # 4c. Clasificar regimen (EMA50 vs EMA200 en 1h, causal)
+        regime = classify_regime(feats)
+        log.info("[%s] Regime: %s", tf, regime)
+
+        # 4d. Verificar si el regimen esta habilitado para este TF
+        regime_rules = paper.get("regime_rules", {})
+        tf_rules = regime_rules.get(tf, {})
+        regime_config = tf_rules.get(regime)
+
+        if regime_config is None or not regime_config.get("enabled", False):
+            diag_payload["tf_results"][tf] = {
+                "phase": "regime_filtered", "regime": regime}
+            _save_diag()
+            decision_row_skip = {
+                "tick_ts_utc": now.isoformat(),
+                "timeframe": tf,
+                "candle_close_time": close_t.isoformat() if hasattr(close_t, "isoformat") else str(close_t),
+                "btc_close": float(last_row.get("ohlcv_btc_close", float("nan"))),
+                "vol_pred": vol_pred, "vol_decile": decile,
+                "regime": regime, "decision": "NO",
+                "reason_no_signal": f"REGIME_{regime.upper()}_NOT_ENABLED",
+                "dry_run": bool(args.dry_run),
+            }
+            try:
+                append_decision(cfg.logs_dir, decision_row_skip)
+            except Exception as e:
+                log.warning("[%s] CSV decision fail: %s", tf, e)
+            log.info("[%s] Regime '%s' not enabled for this TF. Skipping.", tf, regime)
+            continue
+
+        threshold = float(regime_config["threshold"])
+        leverage = float(regime_config["leverage"])
+        log.info("[%s] Regime '%s' enabled: threshold=%.2f, leverage=%.1fx",
+                 tf, regime, threshold, leverage)
+
+        # 4e. Senal
         model_path = cfg.models_dir / strat["model"]["model_filename"].format(tf=tf)
         calib_path = cfg.calibration_dir / strat["model"]["calibration_filename"]
         lib_path = cfg.candidates_dir / strat["candidates"]["library_filename"].format(tf=tf)
@@ -219,8 +254,8 @@ def run_tick(cfg, args) -> int:
             library_path=str(lib_path),
             model_path=str(model_path),
             calibrator_path=str(calib_path),
-            prob_band_min=band["min"],
-            prob_band_max=band["max"],
+            prob_band_min=threshold,
+            prob_band_max=1.0,
             allowed_sides=paper["allowed_sides"],
             allow_above_band=paper["allow_above_band"],
             require_positive_ev=paper["require_positive_ev"],
@@ -239,18 +274,19 @@ def run_tick(cfg, args) -> int:
             "timeframe": tf,
             "candle_open_time": candle_open.isoformat() if hasattr(candle_open, "isoformat") else str(candle_open),
             "candle_close_time": close_t.isoformat() if hasattr(close_t, "isoformat") else str(close_t),
-            # t+1 abre exactamente cuando t cierra:
             "execution_candle_open": close_t.isoformat() if hasattr(close_t, "isoformat") else str(close_t),
             "btc_close": float(last_row.get("ohlcv_btc_close", float("nan"))),
             "vol_pred": vol_pred,
             "vol_decile": decile,
+            "regime": regime,
+            "leverage": leverage,
             "n_candidates_initial": diag.get("n_candidates_initial", 0),
             "n_in_band": diag.get("n_in_band", 0),
             "p_win_max": diag.get("p_win_max", ""),
             "p_win_min": diag.get("p_win_min", ""),
             "EV_max": diag.get("EV_max", ""),
-            "prob_band_min": band["min"],
-            "prob_band_max": band["max"],
+            "prob_band_min": threshold,
+            "prob_band_max": 1.0,
             "dry_run": bool(args.dry_run),
             "mode": paper["signal_mode"],
         }
@@ -348,9 +384,9 @@ def run_tick(cfg, args) -> int:
         tf_minutes = strat["timeframe_minutes"][tf]
         timeout_time = now + dt.timedelta(minutes=tf_minutes * H_candles)
 
-        notional_eur = paper["wallets"][tf]["initial_capital_eur"]
-        wallet = wallet_mod.load_or_init(cfg.state_dir, tf, notional_eur)
-        notional_eur = float(wallet["cash_eur"])  # usar cash actual
+        init_cap = paper["wallets"][tf]["initial_capital_eur"]
+        wallet = wallet_mod.load_or_init(cfg.state_dir, tf, init_cap)
+        notional_eur = float(wallet["cash_eur"]) * leverage
 
         pos = paper_broker.open_position(
             cfg.state_dir, signal_id=signal_id, timeframe=tf, symbol=args.symbol,
@@ -363,6 +399,8 @@ def run_tick(cfg, args) -> int:
             entry_price_quality=entry_price_quality,
             ideal_entry_price=ideal_entry,
             vol_decile=decile,
+            leverage=leverage,
+            regime=regime,
         )
         wallet_mod.apply_position_open(wallet, pos["position_id"])
         wallet_mod.save(cfg.state_dir, wallet)
