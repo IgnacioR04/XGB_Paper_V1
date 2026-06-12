@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Genera RB16_reporte_modelo_causal.ipynb (Drive, Colab/local)."""
+"""Genera RB16_reporte_modelo_causal.ipynb (Drive, Colab/local).
+
+Reporte completo por BUCKET DE PROBABILIDAD del modelo causal sin leakage.
+"""
 import json
 from pathlib import Path
 
@@ -8,20 +11,17 @@ OUT_NB = BASE / "repo/notebooks/08_real_backtest/RB16_reporte_modelo_causal.ipyn
 
 MD0 = """# RB16 - Reporte del modelo CAUSAL (sin leakage)
 
-Todo lo que antes veias del backtest, en un solo notebook, para el modelo
-reentrenado sin leakage (2026-06-12): operaciones por threshold y por
-temporalidad, trades/dia, PnL diario (sin compuesto), apalancamiento,
-mix long/short, curvas de equity.
+Reporte completo del modelo Approach B reentrenado el 2026-06-12 sin
+leakage. Todo desglosado por **bucket de probabilidad calibrada** y por
+**timeframe**, en train / val / test.
 
-Semantica identica al bot: `p_win_isotonic >= threshold` (sin tope),
-1 senal max por vela (top EV), coste 0.0012, cartera de 1 posicion con
-notional fijo 100 EUR. AUC test ~0.547 en los 3 TFs.
-p_iso maximo alcanzable: 15m 0.613 | 1h 0.678 | 4h 1.000.
+Semantica: 1 senal por vela (top EV), coste 0.0012, notional fijo 100 EUR.
+AUC test ~0.547 en los 3 TFs. p_iso maximo: 15m 0.613 | 1h 0.678 | 4h 1.0.
 """
 
-C1 = """# Celda 1
+C1 = '''# Celda 1
 # Objetivo
-# Setup + carga de signals (val/test) y duraciones reales desde labels.
+# Setup + carga de signals (train/val/test) + duraciones reales.
 
 from pathlib import Path
 import numpy as np
@@ -41,12 +41,17 @@ COST = 0.0012
 NOTIONAL = 100.0
 TF_MIN = {"15m": 15, "1h": 60, "4h": 240}
 TFS = ["15m", "1h", "4h"]
-THRESHOLDS = [0.50, 0.52, 0.55, 0.58, 0.60, 0.62, 0.65, 0.67, 0.70, 0.75]
+SPLITS = ["train", "val", "test"]
+BUCKETS = [0.50, 0.55, 0.57, 0.60, 0.62, 0.65, 0.67, 0.70, 0.75, 0.80, 1.0001]
+BUCKET_LBL = [f"{a:.2f}" for a in BUCKETS[:-1]]
 COLORS = {"15m": "steelblue", "1h": "darkorange", "4h": "seagreen"}
 
 sig = {}
-for ds in ["val", "test"]:
-    df = pd.read_parquet(DIR_RB / f"signals/signals_{ds}.parquet")
+for ds in SPLITS:
+    p = DIR_RB / f"signals/signals_{ds}.parquet"
+    if not p.exists():
+        print(f"AVISO: falta {p.name}"); continue
+    df = pd.read_parquet(p)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     sig[ds] = df
 
@@ -66,324 +71,351 @@ for ds in sig:
     sig[ds]["net012"] = sig[ds]["net_return"].astype(float) - (COST - 0.001)
     sig[ds]["dur_min"] = (sig[ds]["timeframe"].map(TF_MIN)
                           * sig[ds]["time_to_exit"].fillna(sig[ds]["H"]))
-print("val:", sig["val"].shape, "| test:", sig["test"].shape)
+    sig[ds]["bucket"] = pd.cut(sig[ds]["p_win_isotonic"], bins=BUCKETS,
+                                labels=BUCKET_LBL, include_lowest=True)
 
 
-def bot_stream(df, tf, thr):
-    sub = df[(df.timeframe == tf) & (df.p_win_isotonic >= thr)]
-    if not len(sub):
-        return sub
-    return (sub.loc[sub.groupby("timestamp")["EV_pred"].idxmax()]
-               .sort_values("timestamp").reset_index(drop=True))
+def top_ev_per_candle(df):
+    """1 senal por (timestamp, tf): la de mayor EV. Asi es como opera el bot."""
+    if not len(df):
+        return df
+    return (df.loc[df.groupby(["timestamp", "timeframe"])["EV_pred"].idxmax()]
+              .sort_values("timestamp").reset_index(drop=True))
 
 
-def wallet_fixed(s):
-    open_until, rows = None, []
-    for _, r in s.iterrows():
-        if open_until is not None and r.timestamp < open_until:
-            continue
-        if not np.isfinite(r.dur_min):
-            continue
-        open_until = r.timestamp + pd.Timedelta(minutes=float(r.dur_min))
-        rows.append(r)
-    return pd.DataFrame(rows)
-"""
+def metrics(nr, dur_min, days):
+    """Win rate, expectancy, PF, Sharpe (por trade), Calmar (anual/|maxDD|),
+    maxDD, PnL/dia (EUR sobre 100 notional), trades_dia/mes/anyo."""
+    if len(nr) < 5:
+        return None
+    pnl = nr * NOTIONAL
+    eq = np.cumsum(pnl)
+    peak = np.maximum.accumulate(eq)
+    dd = eq - peak
+    max_dd = float(dd.min())
+    pos = pnl[pnl > 0]; neg = -pnl[pnl < 0]
+    pf = pos.sum() / neg.sum() if neg.sum() > 0 else np.inf
+    sharpe = nr.mean() / nr.std() * np.sqrt(252) if nr.std() > 0 else 0
+    n_per_day = len(nr) / max(days, 1)
+    pnl_per_day = pnl.sum() / max(days, 1)
+    anual = pnl_per_day * 365
+    calmar = anual / abs(max_dd) if max_dd < 0 else np.inf
+    return {
+        "n": int(len(nr)),
+        "win_rate": float((nr > 0).mean()),
+        "expectancy": float(nr.mean()),
+        "PF": float(pf),
+        "sharpe": float(sharpe),
+        "calmar": float(calmar),
+        "max_dd_eur": max_dd,
+        "pnl_total": float(pnl.sum()),
+        "pnl_dia": float(pnl_per_day),
+        "trades_dia": float(n_per_day),
+        "trades_mes": float(n_per_day * 30),
+        "trades_anyo": float(n_per_day * 365),
+    }
 
-C2 = """# Celda 2
+
+print("Splits cargados:", list(sig.keys()))
+for ds in sig:
+    print(f"  {ds}: {len(sig[ds]):,} senales raw")
+'''
+
+C2 = '''# Celda 2
 # Objetivo
-# Grid de thresholds por TF (todas las senales, sin restriccion de cartera).
-# Tablas val y test + graficas n_trades / expectancy / retorno total.
+# Tabla maestra: metricas por (split, tf, bucket). UNA senal por vela.
 
-grids = {}
-for ds in ["val", "test"]:
-    rows = []
+rows = []
+for ds in sig:
+    days = max(1, (sig[ds]["timestamp"].max() - sig[ds]["timestamp"].min()).days)
+    sel = top_ev_per_candle(sig[ds])
     for tf in TFS:
-        for thr in THRESHOLDS:
-            s = bot_stream(sig[ds], tf, thr)
-            if len(s) < 5:
-                continue
-            days = max(1, (s.timestamp.max() - s.timestamp.min()).days)
-            nr = s.net012.values
-            pos, neg = nr[nr > 0], -nr[nr < 0]
-            rows.append({
-                "tf": tf, "thr": thr, "n": len(s),
-                "por_dia": round(len(s) / days, 2),
-                "pct_long": round((s.side == "long").mean() * 100, 0),
-                "win_rate": round((nr > 0).mean(), 3),
-                "expectancy": round(nr.mean(), 5),
-                "PF": round(pos.sum() / neg.sum(), 2) if neg.sum() > 0 else np.inf,
-                "ret_total": round(nr.sum(), 2)})
-    grids[ds] = pd.DataFrame(rows)
-    print(f"=== {ds.upper()} ===")
-    print(grids[ds].to_string(index=False))
+        for bk in BUCKET_LBL:
+            sub = sel[(sel.timeframe == tf) & (sel.bucket == bk)]
+            m = metrics(sub.net012.values, sub.dur_min.values, days)
+            if m is None: continue
+            m.update({"split": ds, "tf": tf, "bucket": bk})
+            rows.append(m)
+master_tbl = pd.DataFrame(rows)
+# orden + redondeo
+ord_cols = ["split", "tf", "bucket", "n", "trades_dia", "trades_mes",
+            "trades_anyo", "win_rate", "expectancy", "PF", "sharpe",
+            "calmar", "max_dd_eur", "pnl_total", "pnl_dia"]
+master_tbl = master_tbl[ord_cols]
+for c in ["win_rate", "expectancy", "PF", "sharpe", "calmar"]:
+    master_tbl[c] = master_tbl[c].round(3)
+for c in ["max_dd_eur", "pnl_total", "pnl_dia"]:
+    master_tbl[c] = master_tbl[c].round(2)
+for c in ["trades_dia", "trades_mes", "trades_anyo"]:
+    master_tbl[c] = master_tbl[c].round(1)
+
+for ds in sig:
+    print(f"\\n=== {ds.upper()} ===")
+    print(master_tbl[master_tbl.split == ds].to_string(index=False))
+'''
+
+C3 = '''# Celda 3
+# Objetivo
+# Win rate por BUCKET (subplots TF x split). La linea horizontal 0.5
+# es el umbral de paridad.
+
+fig, axes = plt.subplots(len(TFS), len(sig), figsize=(4.5*len(sig), 3*len(TFS)),
+                         sharey=True)
+if len(TFS) == 1: axes = np.array([axes])
+if len(sig) == 1: axes = axes.reshape(-1, 1)
+for i, tf in enumerate(TFS):
+    for j, ds in enumerate(sig.keys()):
+        ax = axes[i][j]
+        g = master_tbl[(master_tbl.tf == tf) & (master_tbl.split == ds)]
+        ax.bar(g.bucket.astype(str), g.win_rate, color=COLORS[tf])
+        ax.axhline(0.5, color="black", lw=0.5)
+        ax.set_title(f"{tf} | {ds}")
+        ax.set_xlabel("bucket p_iso"); ax.tick_params(axis="x", rotation=45)
+        if j == 0: ax.set_ylabel("win rate")
+        ax.set_ylim(0.3, 1.0)
+        ax.grid(alpha=0.3)
+plt.suptitle("Win rate por bucket de probabilidad", y=1.01)
+plt.tight_layout(); plt.show()
+'''
+
+C4 = '''# Celda 4
+# Objetivo
+# Win rate por DECIL DE VOLATILIDAD (subplots TF x split). Sin filtro de
+# threshold (todas las senales).
+
+fig, axes = plt.subplots(len(TFS), len(sig), figsize=(4.5*len(sig), 3*len(TFS)),
+                         sharey=True)
+if len(TFS) == 1: axes = np.array([axes])
+if len(sig) == 1: axes = axes.reshape(-1, 1)
+for i, tf in enumerate(TFS):
+    for j, ds in enumerate(sig.keys()):
+        ax = axes[i][j]
+        sel = top_ev_per_candle(sig[ds])
+        sub = sel[sel.timeframe == tf]
+        rows_d = []
+        for dec, g in sub.groupby("vol_decile"):
+            if len(g) < 30: continue
+            rows_d.append({"decil": int(dec),
+                           "win_rate": (g.net012 > 0).mean(),
+                           "n": len(g)})
+        d = pd.DataFrame(rows_d)
+        if len(d):
+            ax.bar(d.decil, d.win_rate, color=COLORS[tf])
+        ax.axhline(0.5, color="black", lw=0.5)
+        ax.set_title(f"{tf} | {ds}")
+        ax.set_xlabel("decil vol"); ax.set_ylim(0.3, 1.0)
+        if j == 0: ax.set_ylabel("win rate")
+        ax.grid(alpha=0.3)
+plt.suptitle("Win rate por decil de volatilidad", y=1.01)
+plt.tight_layout(); plt.show()
+'''
+
+C5 = '''# Celda 5
+# Objetivo
+# Metricas clave por bucket (TEST): expectancy, Sharpe, Calmar, max DD
+# en 4 paneles, una linea por TF.
+
+fig, axes = plt.subplots(2, 2, figsize=(13, 7))
+panels = [("expectancy", "Expectancy por trade"),
+          ("sharpe", "Sharpe (por trade, anualizado)"),
+          ("calmar", "Calmar (retorno anual / |max DD|)"),
+          ("max_dd_eur", "Max drawdown EUR (notional 100)")]
+for ax, (col, title) in zip(axes.flat, panels):
+    for tf in TFS:
+        g = master_tbl[(master_tbl.split == "test") & (master_tbl.tf == tf)]
+        v = g[col].replace([np.inf, -np.inf], np.nan)
+        ax.plot(g.bucket.astype(str), v, marker="o", label=tf,
+                color=COLORS[tf])
+    ax.set_title(title); ax.set_xlabel("bucket p_iso")
+    ax.tick_params(axis="x", rotation=45)
+    ax.axhline(0, color="black", lw=0.5); ax.grid(alpha=0.3); ax.legend()
+plt.suptitle("Metricas por bucket (TEST)", y=1.00)
+plt.tight_layout(); plt.show()
+
+# Tabla TEST resumen
+print("\\nTabla TEST resumen (para anotar):")
+print(master_tbl[master_tbl.split == "test"][[
+    "tf", "bucket", "n", "trades_dia", "trades_anyo", "win_rate",
+    "expectancy", "PF", "sharpe", "calmar", "max_dd_eur", "pnl_total"
+]].to_string(index=False))
+'''
+
+C6 = '''# Celda 6
+# Objetivo
+# Trades por dia / mes / anyo por bucket (TEST). Util para ver actividad.
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+for ax, met in zip(axes, ["trades_dia", "trades_mes", "trades_anyo"]):
+    for tf in TFS:
+        g = master_tbl[(master_tbl.split == "test") & (master_tbl.tf == tf)]
+        ax.plot(g.bucket.astype(str), g[met], marker="o", label=tf,
+                color=COLORS[tf])
+    ax.set_title(met); ax.set_xlabel("bucket p_iso")
+    ax.tick_params(axis="x", rotation=45); ax.set_yscale("log")
+    ax.grid(alpha=0.3); ax.legend()
+plt.suptitle("Frecuencia de trades por bucket (TEST, escala log)", y=1.01)
+plt.tight_layout(); plt.show()
+'''
+
+C7 = '''# Celda 7
+# Objetivo
+# Apalancamiento: cuanto aumenta el PnL y el drawdown con L = 1..10.
+# Con notional fijo es LINEAL en L, asi que sale a partir de las cifras
+# base. Tambien graficas equity y drawdown para L = 1, 3, 5, 10.
+
+L_VALUES = list(range(1, 11))
+FUNDING_8H = 0.0001  # ~0.01% cada 8h en BTC perpetual
+
+# tabla escalada por bucket TEST mejor de cada TF
+print("=== Apalancamiento (TEST) - PnL anual y max DD por L ===")
+print(f"{'TF':>4} {'bucket':>8} {'L':>3}  PnL/anyo  funding/anyo  netPnL/anyo  maxDD_EUR  Calmar")
+sel_test = top_ev_per_candle(sig["test"]) if "test" in sig else None
+days_test = max(1, (sig["test"]["timestamp"].max()
+                    - sig["test"]["timestamp"].min()).days)
+
+def stats_with_L(sub, days, L):
+    pnl_unit = sub.net012.values * NOTIONAL
+    # funding por trade: notional * L * (dur_h / 8) * funding_8h
+    fund_unit = sub.dur_min.values / 60 / 8 * FUNDING_8H * NOTIONAL
+    pnl = pnl_unit * L - fund_unit * L
+    eq = np.cumsum(pnl)
+    peak = np.maximum.accumulate(eq)
+    dd = eq - peak
+    return {
+        "pnl_total": pnl.sum(),
+        "pnl_anyo": pnl.sum() * 365 / days,
+        "fund_anyo": -fund_unit.sum() * L * 365 / days,
+        "max_dd": dd.min(),
+        "calmar": (pnl.sum() * 365 / days) / abs(dd.min()) if dd.min() < 0 else np.inf,
+        "eq": eq, "dd": dd,
+    }
+
+# elegir mejor bucket por TF (mayor Calmar test)
+best = {}
+for tf in TFS:
+    g = master_tbl[(master_tbl.split == "test") & (master_tbl.tf == tf)
+                   & (master_tbl.n >= 20)]
+    if not len(g): continue
+    g = g[~g.calmar.isin([np.inf])]
+    if not len(g): continue
+    best[tf] = g.sort_values("calmar", ascending=False).iloc[0].bucket
+
+print()
+for tf, bk in best.items():
+    sub = sel_test[(sel_test.timeframe == tf) & (sel_test.bucket == bk)]
+    for L in L_VALUES:
+        s = stats_with_L(sub, days_test, L)
+        print(f"{tf:>4} {str(bk):>8} {L:>3}  {s['pnl_anyo']:+8.1f}  "
+              f"{s['fund_anyo']:+8.2f}  {s['pnl_anyo']+s['fund_anyo']:+8.1f}  "
+              f"{s['max_dd']:+8.1f}  {s['calmar']:.2f}")
     print()
 
-fig, axes = plt.subplots(1, 3, figsize=(16, 4.2))
-for ax, met in zip(axes, ["n", "expectancy", "ret_total"]):
+# graficas equity + drawdown apalancado (mejor bucket por TF)
+fig, axes = plt.subplots(2, len(best), figsize=(5*len(best), 7), sharex="col")
+for k, (tf, bk) in enumerate(best.items()):
+    sub = sel_test[(sel_test.timeframe == tf) & (sel_test.bucket == bk)]
+    for L in [1, 3, 5, 10]:
+        s = stats_with_L(sub, days_test, L)
+        axes[0][k].plot(sub.timestamp, s["eq"], label=f"L={L}", lw=1.0)
+        axes[1][k].plot(sub.timestamp, s["dd"], label=f"L={L}", lw=1.0)
+    axes[0][k].set_title(f"{tf} bucket {bk}: Equity")
+    axes[1][k].set_title(f"{tf} bucket {bk}: Drawdown")
+    axes[0][k].grid(alpha=0.3); axes[1][k].grid(alpha=0.3)
+    axes[0][k].axhline(0, color="black", lw=0.5)
+    axes[0][k].legend(fontsize=8); axes[1][k].legend(fontsize=8)
+plt.suptitle("Equity y Drawdown apalancados (TEST, sobre 100 EUR base)",
+             y=1.00)
+plt.tight_layout(); plt.show()
+
+# Resumen: ratio retorno/riesgo NO cambia con L (escalan lineal). Es UN
+# numero por (tf, bucket).
+print("\\nRatio retorno/riesgo (anual/|maxDD|) - constante en L, util para")
+print("comparar configuraciones:")
+print(f"{'TF':>4} {'bucket':>8}  ratio")
+for tf, bk in best.items():
+    sub = sel_test[(sel_test.timeframe == tf) & (sel_test.bucket == bk)]
+    s = stats_with_L(sub, days_test, 1)
+    print(f"{tf:>4} {str(bk):>8}  {s['calmar']:.2f}")
+'''
+
+C8 = '''# Celda 8
+# Objetivo
+# Win rate / PnL / Sharpe / Drawdown por REGIMEN DE TENDENCIA, por bucket.
+# Regimen calculado con EMA50 vs EMA200 sobre close 1h del master 15m
+# (alcista / bajista / lateral).
+
+mc = pd.read_parquet(DIR_LBL / "master_close_only.parquet")
+mc["timestamp"] = pd.to_datetime(mc["timestamp"])
+if getattr(mc["timestamp"].dt, "tz", None) is not None:
+    mc["timestamp"] = mc["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
+mc = mc.set_index("timestamp").sort_index()
+h1 = mc["ohlcv_btc_close"].resample("1h").last().dropna()
+e50 = h1.ewm(span=50, adjust=False).mean()
+e200 = h1.ewm(span=200, adjust=False).mean()
+regime = pd.Series("lateral", index=h1.index, name="regimen")
+regime[(h1 > e200) & (e50 > e200)] = "alcista"
+regime[(h1 < e200) & (e50 < e200)] = "bajista"
+reg_df = regime.reset_index()
+
+def annotate_regime(df):
+    df = df.sort_values("timestamp")
+    return pd.merge_asof(df, reg_df, on="timestamp", direction="backward")
+
+# Tabla por (tf, regimen, bucket) en TEST
+sel = annotate_regime(top_ev_per_candle(sig["test"]))
+days_test = max(1, (sig["test"]["timestamp"].max()
+                    - sig["test"]["timestamp"].min()).days)
+rows = []
+for tf in TFS:
+    for reg in ["alcista", "bajista", "lateral"]:
+        for bk in BUCKET_LBL:
+            sub = sel[(sel.timeframe == tf) & (sel.regimen == reg)
+                       & (sel.bucket == bk)]
+            if len(sub) < 10: continue
+            m = metrics(sub.net012.values, sub.dur_min.values, days_test)
+            if m is None: continue
+            m.update({"tf": tf, "regimen": reg, "bucket": bk})
+            rows.append(m)
+trend_tbl = pd.DataFrame(rows)
+print("=== Por regimen de tendencia (TEST) ===")
+print(trend_tbl[["tf", "regimen", "bucket", "n", "win_rate", "expectancy",
+                  "sharpe", "max_dd_eur", "pnl_total"]].round(3).to_string(index=False))
+
+# Heatmap win_rate (filas TF, columnas regimen, valor: media ponderada por bucket)
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+for ax, met, title in zip(axes,
+                          ["win_rate", "expectancy", "pnl_total"],
+                          ["Win rate", "Expectancy", "PnL total EUR"]):
     for tf in TFS:
-        g = grids["test"][grids["test"].tf == tf]
-        ax.plot(g.thr, g[met], marker="o", label=tf, color=COLORS[tf])
-    ax.axvline(0.67, color="grey", ls="--", lw=0.8, label="thr bot 0.67")
-    ax.set_title(f"{met} vs threshold (TEST)")
-    ax.grid(alpha=0.3); ax.legend(fontsize=8)
-    if met != "n":
-        ax.axhline(0, color="black", lw=0.5)
-plt.tight_layout(); plt.show()
-"""
-
-C3 = """# Celda 3
-# Objetivo
-# Regla del bot (1 posicion, notional fijo 100 EUR): trades/dia, PnL diario,
-# rachas. TEST. Sin interes compuesto.
-
-
-def maxstreak(nr):
-    s = m = 0
-    for x in nr:
-        s = s + 1 if x <= 0 else 0
-        m = max(m, s)
-    return m
-
-
-detail = {}
-rows = []
-for tf in TFS:
-    for thr in THRESHOLDS:
-        s = bot_stream(sig["test"], tf, thr)
-        if len(s) < 5:
-            continue
-        t = wallet_fixed(s)
-        if len(t) < 5:
-            continue
-        days = max(1, (t.timestamp.max() - t.timestamp.min()).days)
-        pnl = t.net012.values * NOTIONAL
-        daily = pd.Series(pnl, index=t.timestamp).resample("1D").sum()
-        detail[(tf, thr)] = (t, daily)
-        rows.append({"tf": tf, "thr": thr, "trades": len(t),
-                     "trades_dia": round(len(t) / days, 2),
-                     "PnL_total": round(pnl.sum(), 1),
-                     "PnL_dia": round(daily.mean(), 3),
-                     "peor_dia": round(daily.min(), 2),
-                     "mejor_dia": round(daily.max(), 2),
-                     "racha_perd": maxstreak(pnl),
-                     "pct_dias_neg": round((daily < 0).mean() * 100, 0)})
-bot_tbl = pd.DataFrame(rows)
-print("=== Regla del bot (TEST, 100 EUR fijos) ===")
-print(bot_tbl.to_string(index=False))
-"""
-
-C4 = """# Celda 4
-# Objetivo
-# Equity acumulada (sin compuesto, EUR sobre 100 fijos) para thresholds
-# clave por TF + PnL diario en barras para la config del bot (0.67).
-
-fig, axes = plt.subplots(1, 3, figsize=(16, 4.2))
-for ax, tf in zip(axes, TFS):
-    for thr in [0.55, 0.60, 0.65, 0.67, 0.70]:
-        if (tf, thr) not in detail:
-            continue
-        t, _ = detail[(tf, thr)]
-        eq = (t.net012 * NOTIONAL).cumsum()
-        ax.plot(t.timestamp, eq, label=f"thr {thr}", lw=1.1)
-    ax.axhline(0, color="black", lw=0.5)
-    ax.set_title(f"{tf}: PnL acumulado EUR (TEST, sin compuesto)")
-    ax.grid(alpha=0.3); ax.legend(fontsize=8)
-plt.tight_layout(); plt.show()
-
-# PnL diario de la config desplegada (la que tenga senales con thr 0.67)
-fig, axes = plt.subplots(len(TFS), 1, figsize=(13, 7), sharex=False)
-for ax, tf in zip(axes, TFS):
-    key = (tf, 0.67)
-    if key not in detail:
-        ax.set_title(f"{tf}: sin senales con thr 0.67 (p_iso max insuficiente)")
-        ax.axis("off")
-        continue
-    _, daily = detail[key]
-    ax.bar(daily.index, daily.values, width=0.9,
-           color=np.where(daily.values >= 0, "#3fb950", "#f85149"))
-    ax.set_title(f"{tf} thr=0.67: PnL diario (media {daily.mean():+.3f} EUR)")
+        for j, reg in enumerate(["alcista", "lateral", "bajista"]):
+            g = trend_tbl[(trend_tbl.tf == tf) & (trend_tbl.regimen == reg)]
+            v = (g[met] * g.n).sum() / g.n.sum() if g.n.sum() else np.nan
+            ax.bar(f"{reg}\\n{tf}", v, color=COLORS[tf])
+    ax.set_title(title); ax.tick_params(axis="x", rotation=45)
+    if met == "win_rate": ax.axhline(0.5, color="black", lw=0.5)
+    else: ax.axhline(0, color="black", lw=0.5)
     ax.grid(alpha=0.3)
+plt.suptitle("Por regimen (medias ponderadas por bucket, TEST)", y=1.01)
 plt.tight_layout(); plt.show()
-"""
 
-C5 = """# Celda 5
-# Objetivo
-# Apalancamiento: PnL/dia x L con funding, peor dia/racha, seguridad de
-# liquidacion (aislada aprox: 1/L - mm; seguro si dist >= 3x SL max).
-
-MM = 0.005
-FUNDING_8H = 0.0001
-LEVELS = [1, 2, 3, 5, 10]
-
-rows = []
-for (tf, thr), (t, daily) in detail.items():
-    if thr not in (0.58, 0.60, 0.65, 0.67, 0.70):
-        continue
-    nr = t.net012.values * NOTIONAL
-    max_sl = t.sl_pct.max()
-    days = max(1, (t.timestamp.max() - t.timestamp.min()).days)
-    fund1 = (t.dur_min / 60 / 8 * FUNDING_8H * NOTIONAL).mean() * len(t) / days
-    cur = worst = 0.0
-    for x in nr:
-        cur = min(0, cur) + x
-        worst = min(worst, cur)
-    L_safe = 1.0 / (3 * max_sl + MM)
-    for lv in LEVELS:
-        rows.append({"tf": tf, "thr": thr, "L": lv,
-                     "PnL_dia": round(daily.mean() * lv - fund1 * lv, 3),
-                     "funding_dia": round(-fund1 * lv, 3),
-                     "peor_dia": round(daily.min() * lv, 2),
-                     "peor_racha": round(worst * lv, 2),
-                     "SL_max_pct": round(max_sl * 100, 2),
-                     "dist_liq_pct": round((1 / lv - MM) * 100, 1),
-                     "seguro": "SI" if lv <= L_safe else
-                               ("JUSTO" if lv <= 1 / (2 * max_sl + MM) else "NO")})
-lev = pd.DataFrame(rows)
-print(lev.to_string(index=False))
-
-fig, ax = plt.subplots(figsize=(9, 4))
-for (tf, thr), g in lev.groupby(["tf", "thr"]):
-    if thr != 0.67 and not (tf == "1h" and thr == 0.58):
-        continue
-    ax.plot(g.L, g.PnL_dia, marker="o", label=f"{tf} thr {thr}")
-ax.set_xlabel("apalancamiento L"); ax.set_ylabel("PnL/dia EUR (100 fijos)")
-ax.grid(alpha=0.3); ax.legend(); ax.set_title("PnL diario vs apalancamiento (TEST)")
+# Equity por regimen y TF (mejor bucket de cada TF)
+fig, axes = plt.subplots(1, len(best), figsize=(5*len(best), 4))
+if len(best) == 1: axes = [axes]
+for ax, (tf, bk) in zip(axes, best.items()):
+    sub_tf = sel[(sel.timeframe == tf) & (sel.bucket == bk)]
+    for reg, color in [("alcista", "seagreen"), ("lateral", "grey"),
+                        ("bajista", "firebrick")]:
+        g = sub_tf[sub_tf.regimen == reg].sort_values("timestamp")
+        if len(g) < 5: continue
+        eq = (g.net012.values * NOTIONAL).cumsum()
+        ax.plot(g.timestamp, eq, label=f"{reg} (n={len(g)})", color=color,
+                lw=1.1)
+    ax.set_title(f"{tf} bucket {bk}: PnL acumulado por regimen")
+    ax.axhline(0, color="black", lw=0.5); ax.grid(alpha=0.3); ax.legend()
 plt.tight_layout(); plt.show()
-"""
 
-C6 = """# Celda 6
-# Objetivo
-# Mix long/short por TF y threshold + mix de salidas + compuesto informativo.
-
-print("=== Mix long/short y salidas (TEST) ===")
-for tf in TFS:
-    for thr in [0.55, 0.60, 0.67]:
-        s = bot_stream(sig["test"], tf, thr)
-        if len(s) < 5:
-            continue
-        mix = s.side.value_counts(normalize=True).round(2).to_dict()
-        exits = s.exit_reason.value_counts(normalize=True).round(2).to_dict()
-        print(f"{tf} thr {thr}: n={len(s)} sides={mix} salidas={exits}")
-
-print()
-print("=== Compuesto informativo (TEST, reinvirtiendo todo, 1 pos) ===")
-for (tf, thr), (t, _) in detail.items():
-    if thr not in (0.58, 0.60, 0.65, 0.67, 0.70):
-        continue
-    eq = NOTIONAL * np.cumprod(1 + t.net012.values)
-    print(f"{tf} thr {thr}: 100 EUR -> {eq[-1]:,.1f} EUR ({len(t)} trades)")
-print()
-print("RB16 OK")
-"""
-
-C7 = """# Celda 7
-# Objetivo
-# Acierto y rentabilidad por DECIL DE VOLATILIDAD (TEST). Dos vistas:
-# todas las senales (thr 0.50) y las senales del threshold desplegado
-# (15m 0.55, 1h/4h 0.67).
-
-DEPLOYED = {"15m": 0.55, "1h": 0.67, "4h": 0.67}
-
-rows = []
-for tf in TFS:
-    for vista, thr in [("todas", 0.50), ("bot", DEPLOYED[tf])]:
-        s = bot_stream(sig["test"], tf, thr)
-        if not len(s):
-            continue
-        for dec, g in s.groupby("vol_decile"):
-            if len(g) < 10:
-                continue
-            nr = g.net012.values
-            pos, neg = nr[nr > 0], -nr[nr < 0]
-            rows.append({"tf": tf, "vista": vista, "decil": int(dec),
-                         "n": len(g),
-                         "win_rate": round((nr > 0).mean(), 3),
-                         "expectancy": round(nr.mean(), 5),
-                         "PF": round(pos.sum() / neg.sum(), 2)
-                         if neg.sum() > 0 else np.inf,
-                         "ret_total": round(nr.sum(), 2)})
-vol_tbl = pd.DataFrame(rows)
-print(vol_tbl.to_string(index=False))
-
-fig, axes = plt.subplots(2, 3, figsize=(16, 7.5))
-for j, tf in enumerate(TFS):
-    for i, met in enumerate(["win_rate", "expectancy"]):
-        ax = axes[i][j]
-        for vista, color in [("todas", "lightsteelblue"), ("bot", COLORS[tf])]:
-            g = vol_tbl[(vol_tbl.tf == tf) & (vol_tbl.vista == vista)]
-            ax.bar(g.decil + (0.2 if vista == "bot" else -0.2), g[met],
-                   width=0.4, color=color, label=vista)
-        ax.set_title(f"{tf}: {met} por decil de vol (TEST)")
-        ax.set_xlabel("vol_decile"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
-        if met == "win_rate":
-            ax.axhline(0.5, color="black", lw=0.5)
-        else:
-            ax.axhline(0, color="black", lw=0.5)
-plt.tight_layout(); plt.show()
-"""
-
-C8 = """# Celda 8
-# Objetivo
-# Retorno/riesgo de APALANCARSE, por threshold y TF (TEST, regla del bot,
-# notional fijo). Clave: retorno y riesgo escalan LINEAL con L, asi que el
-# RATIO retorno/riesgo no depende de L - lo que cambia con L es el nivel
-# absoluto y la distancia a liquidacion. Por eso se muestra:
-#   - PnL/dia y peor racha a L=1
-#   - ratio retorno/riesgo = PnL anual / |peor racha|  (independiente de L)
-#   - L maximo seguro (dist. liquidacion >= 3x SL max) y PnL/dia a ese L
-
-MM = 0.005
-FUNDING_8H = 0.0001
-
-rows = []
-for tf in TFS:
-    for thr in THRESHOLDS:
-        if (tf, thr) not in detail:
-            continue
-        t, daily = detail[(tf, thr)]
-        if len(t) < 10:
-            continue
-        nr = t.net012.values * NOTIONAL
-        days = max(1, (t.timestamp.max() - t.timestamp.min()).days)
-        fund1 = (t.dur_min / 60 / 8 * FUNDING_8H * NOTIONAL).mean() * len(t) / days
-        cur = worst = 0.0
-        for x in nr:
-            cur = min(0, cur) + x
-            worst = min(worst, cur)
-        max_sl = t.sl_pct.max()
-        L_safe = 1.0 / (3 * max_sl + MM)
-        pnl_dia = daily.mean() - fund1
-        anual = pnl_dia * 365
-        ratio = anual / abs(worst) if worst < 0 else np.inf
-        rows.append({"tf": tf, "thr": thr, "trades": len(t),
-                     "PnL_dia_L1": round(pnl_dia, 3),
-                     "peor_racha_L1": round(worst, 2),
-                     "ret_anual_L1": round(anual, 1),
-                     "ratio_ret_riesgo": round(ratio, 2),
-                     "L_max_seguro": round(L_safe, 1),
-                     "PnL_dia_Lmax": round(pnl_dia * L_safe, 2),
-                     "peor_racha_Lmax": round(worst * L_safe, 1)})
-lev_thr = pd.DataFrame(rows)
-print(lev_thr.to_string(index=False))
-
-fig, axes = plt.subplots(1, 2, figsize=(13.5, 4.5))
-for tf in TFS:
-    g = lev_thr[lev_thr.tf == tf]
-    axes[0].plot(g.thr, g.ratio_ret_riesgo, marker="o", label=tf, color=COLORS[tf])
-    axes[1].plot(g.thr, g.PnL_dia_Lmax, marker="o", label=tf, color=COLORS[tf])
-axes[0].set_title("Ratio retorno anual / peor racha (independiente de L)")
-axes[0].set_xlabel("threshold"); axes[0].axhline(0, color="black", lw=0.5)
-axes[1].set_title("PnL/dia EUR al L maximo seguro (100 EUR base)")
-axes[1].set_xlabel("threshold"); axes[1].axhline(0, color="black", lw=0.5)
-for ax in axes:
-    ax.grid(alpha=0.3); ax.legend(fontsize=8)
-plt.tight_layout(); plt.show()
-print()
-print("Lectura: el ratio dice QUE config apalancar (mas alto = mas retorno")
-print("por unidad de dolor); el L_max_seguro dice CUANTO; el PnL_dia_Lmax")
-print("combina ambos. Racha y peor dia escalan lineal con el L elegido.")
-"""
-
+print("\\nRB16 OK")
+'''
 
 nb = {"cells": [], "metadata": {
     "kernelspec": {"display_name": "Python 3", "language": "python",
@@ -391,7 +423,8 @@ nb = {"cells": [], "metadata": {
     "language_info": {"name": "python", "version": "3.11"},
     "colab": {"provenance": []}}, "nbformat": 4, "nbformat_minor": 5}
 for kind, src in [("markdown", MD0), ("code", C1), ("code", C2),
-                  ("code", C3), ("code", C4), ("code", C5), ("code", C6), ("code", C7), ("code", C8)]:
+                  ("code", C3), ("code", C4), ("code", C5), ("code", C6),
+                  ("code", C7), ("code", C8)]:
     nb["cells"].append({"cell_type": kind, "metadata": {},
                         "source": src.splitlines(keepends=True),
                         **({"outputs": [], "execution_count": None}
