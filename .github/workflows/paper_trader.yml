@@ -65,11 +65,21 @@ jobs:
           curl -sS -o /dev/null -w "HTTP %{http_code}\n" "https://data.binance.vision/" || true
           echo "::endgroup::"
 
-      - name: Run paper tick
+      - name: Run paper tick (bot principal)
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "${{ inputs.force_tf }}" ]; then ARGS="$ARGS --force-tf ${{ inputs.force_tf }}"; fi
+          python scripts/run_paper_tick.py $ARGS
+
+      - name: Run paper tick (MODELO OOF)
+        if: always()
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: |
+          ARGS="--profile oof"
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ -n "${{ inputs.force_tf }}" ]; then ARGS="$ARGS --force-tf ${{ inputs.force_tf }}"; fi
           python scripts/run_paper_tick.py $ARGS
@@ -93,7 +103,8 @@ jobs:
         run: |
           git config user.name  "paper-trader-bot"
           git config user.email "paper-trader-bot@users.noreply.github.com"
-          git add -A data/state data/paper_trades data/logs dashboard/data || true
+          git add -A data/state data/paper_trades data/logs dashboard/data \
+                     data/state_oof data/paper_trades_oof data/logs_oof dashboard/data_oof || true
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else

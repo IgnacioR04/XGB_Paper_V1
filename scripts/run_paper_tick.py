@@ -56,6 +56,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--now", type=str, default=None,
                    help="ISO UTC para override. Util en tests.")
     p.add_argument("--symbol", type=str, default="BTCUSDT")
+    p.add_argument("--profile", type=str, default="",
+                   help="'' = bot principal; 'oof' = bot del modelo OOF "
+                        "(usa config/state/dashboard separados).")
     return p.parse_args()
 
 
@@ -426,7 +429,7 @@ def run_tick(cfg, args) -> int:
 
 def main() -> int:
     args = parse_args()
-    cfg = load_config()
+    cfg = load_config(profile=args.profile)
     return run_tick(cfg, args)
 
 

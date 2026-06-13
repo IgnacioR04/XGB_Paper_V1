@@ -1,0 +1,105 @@
+# ============================================================
+# Paper trading config - MODELO OOF (bot paralelo)
+# Mismo motor que el bot principal, distinto modelo y reglas.
+# ============================================================
+
+version: "paper_oof_v1"
+mode: "paper"
+execution_market: "paper_synthetic"
+
+# ---------------------------------------------------------------
+# Carteras independientes - 100 EUR cada una. Las 3 activas.
+# ---------------------------------------------------------------
+wallets:
+  "15m":
+    initial_capital_eur: 100.0
+    enabled: true
+  "1h":
+    initial_capital_eur: 100.0
+    enabled: true
+  "4h":
+    initial_capital_eur: 100.0
+    enabled: true
+
+allow_cross_timeframe_positions: true
+max_positions_per_wallet: 1
+
+# ---------------------------------------------------------------
+# Reglas del bot OOF (todos los regimenes activos):
+#   1h  -> leverage 3x (todos los regimenes)
+#   4h  -> leverage 2x, salvo lateral que es 5x
+#   15m -> leverage 1x, salvo lateral que es 5x
+# Umbral p_win = 0.55 en todo (editable).
+# ---------------------------------------------------------------
+regime_rules:
+  "15m":
+    alcista:
+      enabled: true
+      threshold: 0.55
+      leverage: 1.0
+    bajista:
+      enabled: true
+      threshold: 0.55
+      leverage: 1.0
+    lateral:
+      enabled: true
+      threshold: 0.55
+      leverage: 5.0
+  "1h":
+    alcista:
+      enabled: true
+      threshold: 0.55
+      leverage: 3.0
+    bajista:
+      enabled: true
+      threshold: 0.55
+      leverage: 3.0
+    lateral:
+      enabled: true
+      threshold: 0.55
+      leverage: 3.0
+  "4h":
+    alcista:
+      enabled: true
+      threshold: 0.55
+      leverage: 2.0
+    bajista:
+      enabled: true
+      threshold: 0.55
+      leverage: 2.0
+    lateral:
+      enabled: true
+      threshold: 0.55
+      leverage: 5.0
+
+allow_above_band: true
+require_positive_ev: false
+
+costs:
+  fee_in: 0.0006
+  fee_out: 0.0006
+  total_round_trip: 0.0012
+
+signal_mode: "closed_candle_only"
+selection_policy: "top_EV_per_timeframe"
+allowed_sides: ["long", "short"]
+
+scheduler:
+  run_every_minutes: 5
+  candle_close_delay_seconds:
+    "15m": 20
+    "1h": 30
+    "4h": 60
+  max_late_minutes:
+    "15m": 12
+    "1h": 45
+    "4h": 180
+
+feature_mode: "live_recompute"
+external_artifacts_path: ""
+feature_nan_policy: "tolerate"
+
+stop_conditions:
+  consecutive_losses_max: 10
+  daily_drawdown_max: -0.10
+  weekly_drawdown_max: -0.20

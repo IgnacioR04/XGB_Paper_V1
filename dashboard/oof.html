@@ -2,21 +2,23 @@
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<title>XGB Paper Trader - Dashboard</title>
+<title>MODELO OOF - Paper Trader</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <script>document.write('<link rel="stylesheet" href="styles.css?v=' + Date.now() + '" />');</script>
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>window.DATA_DIR = "data_oof";</script>
 </head>
 <body>
 <nav class="tabs" style="display:flex;gap:8px;padding:10px 16px;border-bottom:1px solid #2a2a3a;background:#15151f;position:sticky;top:0;z-index:50">
-  <a href="index.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:#2d6cdf;color:#fff">Modelo actual</a>
-  <a href="oof.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:transparent;color:#aab;border:1px solid #2a2a3a">MODELO OOF</a>
+  <a href="index.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:transparent;color:#aab;border:1px solid #2a2a3a">Modelo actual</a>
+  <a href="oof.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:#8e44ef;color:#fff">MODELO OOF</a>
 </nav>
 <header>
   <div class="header-row">
     <div>
-      <h1>XGB Paper Trader</h1>
-      <p>Approach B (causal, reentrenado 2026-06-12) - XGBoost label_win - calibracion isotonic - threshold p_win: 15m &ge; 0.55, 1h/4h &ge; 0.67</p>
+      <h1>MODELO OOF &mdash; Paper Trader</h1>
+      <p>Modelo OOF (walk-forward, train &le; 2025-12-31) - XGBoost label_win - calibracion isotonic.
+      Reglas: 1h leverage 3x | 4h 2x (lateral 5x) | 15m 1x (lateral 5x). Umbral p_win &ge; 0.55.</p>
       <p id="generated-at" class="muted"></p>
     </div>
     <div class="live-price">
@@ -87,9 +89,8 @@
 <section class="card">
   <h3>Posiciones abiertas</h3>
   <div id="open-positions"></div>
-  <p class="muted small">Nota: el bot opera con precios de Coinbase (BTC-USD) cuando Binance
-  bloquea los runners de GitHub; las graficas muestran Binance desde tu navegador. Puede haber
-  diferencias de unas decenas de dolares entre lo que ves y lo que ejecuto el bot.</p>
+  <p class="muted small">Bot del MODELO OOF. Opera con precios de Coinbase (BTC-USD) cuando Binance
+  bloquea los runners de GitHub; las graficas muestran Binance desde tu navegador.</p>
 </section>
 
 <section class="card">
@@ -114,7 +115,7 @@
 
 <section class="card">
   <div class="card-header">
-    <h3>Historial de senales <span class="muted small">(en el cierre de la vela t se pregunta al modelo; si dice SI se opera en la apertura de t+1)</span></h3>
+    <h3>Historial de senales <span class="muted small">(en el cierre de la vela t se pregunta al modelo OOF; si dice SI se opera en la apertura de t+1)</span></h3>
     <div class="toolbar">
       <div class="tf-buttons" data-target="signals">
         <button data-tf="all" class="tf-btn active">Todas</button>

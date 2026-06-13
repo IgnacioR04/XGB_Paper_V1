@@ -732,12 +732,16 @@ async function refreshTfCharts(trades, openPositions) {
   }
 }
 
+// Directorio de datos: "data" (bot principal) o "data_oof" (modelo OOF).
+// Lo fija cada pagina via window.DATA_DIR antes de cargar este script.
+const DATA_DIR = (typeof window !== "undefined" && window.DATA_DIR) ? window.DATA_DIR : "data";
+
 async function refreshBotData() {
   const [summary, openPos, trades, signals] = await Promise.all([
-    fetchJSON("data/summary.json", { wallets: {}, generated_at: null }),
-    fetchJSON("data/open_positions.json", { open_positions: [] }),
-    fetchJSON("data/trades.json", { trades: [] }),
-    fetchJSON("data/signals.json", { signals: [] }),
+    fetchJSON(DATA_DIR + "/summary.json", { wallets: {}, generated_at: null }),
+    fetchJSON(DATA_DIR + "/open_positions.json", { open_positions: [] }),
+    fetchJSON(DATA_DIR + "/trades.json", { trades: [] }),
+    fetchJSON(DATA_DIR + "/signals.json", { signals: [] }),
   ]);
   renderSummary(summary);
   renderOpenPositions(openPos);
@@ -748,7 +752,7 @@ async function refreshBotData() {
   renderTradesTable();
 
   for (const tf of TFS) {
-    const eq = await fetchJSON(`data/equity_${tf}.json`, { curve: [], initial_capital_eur: 100 });
+    const eq = await fetchJSON(`${DATA_DIR}/equity_${tf}.json`, { curve: [], initial_capital_eur: 100 });
     let points = (eq.curve || [])
       .map(p => ({ time: toUnix(p.ts), value: +p.equity }))
       .filter(p => p.time != null);
