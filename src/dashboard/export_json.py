@@ -68,28 +68,37 @@ def export_all(cfg) -> None:
 
     paper = cfg.paper
 
-    # Equity per timeframe
+    # Equity per timeframe. Defensivo con .get() para que un wallet con
+    # esquema parcial nunca tumbe la exportacion del resto del dashboard
+    # (signals/trades). El dashboard debe mostrar SIEMPRE las decisiones.
     summary_by_tf = {}
     for tf, wcfg in paper["wallets"].items():
         w = read_json(wallet_mod.wallet_path(cfg.state_dir, tf))
         if w is None:
-            continue
+            w = {}
+        init_cap = float(w.get("initial_capital_eur",
+                               wcfg.get("initial_capital_eur", 100.0)))
+        cash = float(w.get("cash_eur", init_cap))
+        equity = float(w.get("equity_eur", cash))
+        n_trades = int(w.get("n_trades", 0))
+        n_wins = int(w.get("n_wins", 0))
+        n_losses = int(w.get("n_losses", 0))
         curve = w.get("equity_curve", [])
         write_json_atomic(out / f"equity_{tf}.json", {
             "timeframe": tf,
-            "initial_capital_eur": w["initial_capital_eur"],
+            "initial_capital_eur": init_cap,
             "curve": curve,
         })
         summary_by_tf[tf] = {
-            "initial_capital_eur": w["initial_capital_eur"],
-            "cash_eur": w["cash_eur"],
-            "equity_eur": w["equity_eur"],
-            "realized_pnl_eur": w["realized_pnl_eur"],
-            "n_trades": w["n_trades"],
-            "n_wins": w["n_wins"],
-            "n_losses": w["n_losses"],
-            "win_rate": (w["n_wins"] / w["n_trades"]) if w["n_trades"] else 0.0,
-            "open_position_id": w["open_position_id"],
+            "initial_capital_eur": init_cap,
+            "cash_eur": cash,
+            "equity_eur": equity,
+            "realized_pnl_eur": float(w.get("realized_pnl_eur", 0.0)),
+            "n_trades": n_trades,
+            "n_wins": n_wins,
+            "n_losses": n_losses,
+            "win_rate": (n_wins / n_trades) if n_trades else 0.0,
+            "open_position_id": w.get("open_position_id"),
         }
 
     # Trades
@@ -116,7 +125,8 @@ def export_all(cfg) -> None:
     signals = []
     if not sig_df.empty:
         keep = [c for c in (
-            "tick_ts_utc", "timeframe", "candle_open_time", "candle_close_time",
+            "tick_ts_utc", "timeframe", "regime", "leverage",
+            "candle_open_time", "candle_close_time",
             "execution_candle_open", "btc_close", "vol_pred", "vol_decile",
             "n_candidates_initial", "n_in_band", "p_win_max", "EV_max",
             "decision", "reason_no_signal", "winner_side",

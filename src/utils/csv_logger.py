@@ -27,6 +27,8 @@ import pandas as pd
 DECISION_COLUMNS = [
     "tick_ts_utc",            # cuando corrio el tick
     "timeframe",
+    "regime",                 # alcista | bajista | lateral (clasificado en t)
+    "leverage",               # apalancamiento aplicado segun regime_rules
     "candle_open_time",       # apertura de la vela t (la CERRADA usada para inferencia)
     "candle_close_time",      # cierre de t = momento de la pregunta al modelo
     "execution_candle_open",  # apertura de t+1 = cuando se ejecuta la operacion

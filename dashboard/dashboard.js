@@ -611,15 +611,19 @@ function renderSignalsTable() {
     return;
   }
   let html = '<div class="table-wrap"><table><thead><tr>' +
-    "<th>Vela t (cierre = pregunta)</th><th>TF</th><th>BTC close</th>" +
+    "<th>Vela t (cierre = pregunta)</th><th>TF</th><th>Regimen</th><th>BTC close</th>" +
     "<th>vol decile</th><th>candidatos</th><th>en banda</th>" +
     "<th>p_win max</th><th>EV max</th><th>Decision</th><th>Detalle</th>" +
     "<th>Side</th><th>p_win elegido</th><th>Entrada t+1</th></tr></thead><tbody>";
   for (const s of slice) {
     const yes = s.decision === "YES";
+    const regTxt = s.regime
+      ? `${s.regime}${s.leverage ? " " + s.leverage + "x" : ""}`
+      : "-";
     html += `<tr class="${yes ? "row-yes" : ""}">
       <td>${fmtTime(s.candle_close_time)}</td>
       <td>${s.timeframe}</td>
+      <td class="small">${regTxt}</td>
       <td>${fmtPrice(s.btc_close)}</td>
       <td>${s.vol_decile ?? "-"}</td>
       <td>${s.n_candidates_initial ?? "-"}</td>
