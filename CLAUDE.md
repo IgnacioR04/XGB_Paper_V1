@@ -141,8 +141,8 @@ XGB_Paper_V1/
 ## Configuracion: 3 YAMLs
 
 **`paper_trading.yaml`** - lo que cambia operativamente:
-- `wallets`: capital por TF (100 EUR cada una)
-- `regime_rules`: reglas por TF y regimen (enabled, threshold, leverage). El regimen (alcista/bajista/lateral) se clasifica con EMA50 vs EMA200 en 1h via `src/features/regime.py`. Solo se opera en las combinaciones habilitadas.
+- `wallets`: capital por TF (100 EUR cada una). **v3: 15m esta `enabled: false`** (ningun filtro 15m supero el estudio). Solo operan 1h y 4h.
+- `regime_rules`: reglas por TF y regimen (enabled, threshold, leverage). El regimen (alcista/bajista/lateral) se clasifica con EMA50 vs EMA200 en 1h via `src/features/regime.py`. **v3: solo 3 filtros activos** — 1h bajista (0.55, 2x), 1h lateral (0.55, 4x), 4h bajista (0.75, 5x).
 - `allow_above_band: true` - banda abierta por arriba (threshold -> 1.0)
 - `allowed_sides: [long, short]`
 - `signal_mode: closed_candle_only`
@@ -191,9 +191,9 @@ Cada senal tiene un `signal_id = "{symbol}|{tf}|{candle_close_iso}|{side}|{candi
 - Si se reentrena el modelo en Drive, hay que actualizar: los 3 `.json` de modelos, el calibrador, las librerias de candidatos, y posiblemente el feature_schema y vol_decile_bounds.
 - Script para validar coherencia: `scripts/test_feature_parity.py` (compara builder live vs master causal del Drive).
 
-## Estado actual del modelo (2026-06-12)
+## Estado actual del modelo (2026-06-13)
 
-AUC honesto post-fix causal: ~0.55 (antes 0.69-0.77 inflado por leakage). Estrategia v2: regimen condicional con leverage variable. Solo se opera en regimenes especificos por TF (ver `regime_rules` en `paper_trading.yaml`). El 4h bajista usa threshold 0.75 y 5x leverage (donde el modelo muestra mas edge). Carteras reseteadas a 100 EUR.
+AUC honesto post-fix causal: ~0.55 (antes 0.69-0.77 inflado por leakage). **Estrategia v3: solo los 3 filtros ganadores** del estudio de contribucion por filtro (backtest causal 2025-2026 a 1x, notebook RS01 seccion 11 en Drive): 1h bajista (2x), 1h lateral (4x), 4h bajista (5x). 15m deshabilitado; 4h solo opera en bajista. Carteras reseteadas a 100 EUR. Caveat: el backtest que selecciono los filtros usa features completas del master (en vivo solo ~310/605), y son resultados de alta varianza (win-rate ~0.5-0.6 + leverage).
 
 ## Secrets de GitHub Actions
 

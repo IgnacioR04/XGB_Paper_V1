@@ -1,18 +1,21 @@
 # ============================================================
-# Paper trading config - XGB_Paper_V1 (v2 regime-aware)
+# Paper trading config - XGB_Paper_V1 (v3 top-3 filtros)
 # ============================================================
 
-version: "paper_v2_regime"
+version: "paper_v3_top3"
 mode: "paper"
 execution_market: "paper_synthetic"
 
 # ---------------------------------------------------------------
-# Carteras independientes - 100 EUR cada una (reseteadas v2)
+# Carteras independientes - 100 EUR cada una (reseteadas v3)
+# 15m queda deshabilitado: ningun filtro 15m supero el estudio
+# de contribucion por filtro (seccion 11 de RS01). Solo operan
+# 1h y 4h en los regimenes ganadores.
 # ---------------------------------------------------------------
 wallets:
   "15m":
     initial_capital_eur: 100.0
-    enabled: true
+    enabled: false
   "1h":
     initial_capital_eur: 100.0
     enabled: true
@@ -24,23 +27,22 @@ allow_cross_timeframe_positions: true
 max_positions_per_wallet: 1
 
 # ---------------------------------------------------------------
-# Reglas por regimen y timeframe (v2)
+# Reglas por regimen y timeframe (v3 - SOLO los 3 filtros ganadores)
 #
-# Regimen se clasifica con EMA50 vs EMA200 en 1h:
+# Regimen se clasifica con EMA50 vs EMA200 en 1h (causal):
 #   alcista: close > EMA200 AND EMA50 > EMA200
 #   bajista: close < EMA200 AND EMA50 < EMA200
 #   lateral: todo lo demas
 #
-# Solo se opera en las combinaciones listadas. Las demas se ignoran.
+# Tras el estudio de contribucion por filtro a 1x (RS01 seccion 11),
+# solo se conservan los 3 filtros con PnL y Sharpe netos positivos.
+# Cada uno mantiene el leverage que tenia asignado previamente.
+# Eliminados: 15m lateral, 4h alcista, 4h lateral.
+#
 # threshold = p_win_calibrated minimo para operar
 # leverage = apalancamiento sobre el cash disponible
 # ---------------------------------------------------------------
 regime_rules:
-  "15m":
-    lateral:
-      enabled: true
-      threshold: 0.55
-      leverage: 1.0
   "1h":
     bajista:
       enabled: true
@@ -51,18 +53,10 @@ regime_rules:
       threshold: 0.55
       leverage: 4.0
   "4h":
-    alcista:
-      enabled: true
-      threshold: 0.55
-      leverage: 2.0
     bajista:
       enabled: true
       threshold: 0.75
       leverage: 5.0
-    lateral:
-      enabled: true
-      threshold: 0.55
-      leverage: 2.0
 
 # Banda abierta por arriba (opera todo candidato con p >= threshold)
 allow_above_band: true
