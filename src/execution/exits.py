@@ -124,12 +124,20 @@ def monitor_and_close_positions(state_dir: Path, trades_dir: Path,
                                               exit_time=exit_info["exit_time"]
                                               if isinstance(exit_info["exit_time"], dt.datetime)
                                               else None)
-        closed["pnl_eur"] = pnl
-        closed["pnl_pct"] = pnl / pos["notional_eur"] if pos["notional_eur"] else 0.0
 
         # Actualizar wallet
         w = wallet_mod.load_or_init(state_dir, tf,
                                      wallets_initial_capital.get(tf, 100.0))
+        cash_before = float(w.get("cash_eur", 0.0))   # capital de la cartera ANTES del cierre
+        closed["pnl_eur"] = pnl
+        # pnl_pct = cambio REAL de la cartera (incluye leverage), coherente con
+        # la equity. notional = cash_before * leverage, asi que esto = leverage *
+        # retorno de precio. Antes se dividia por notional (retorno sin apalancar)
+        # y no cuadraba con la equity mostrada.
+        closed["pnl_pct"] = pnl / cash_before if cash_before else 0.0
+        # tambien guardamos el retorno sin apalancar por trazabilidad
+        closed["pnl_pct_notional"] = (
+            pnl / pos["notional_eur"] if pos.get("notional_eur") else 0.0)
         exit_ts = closed["exit_time"]
         wallet_mod.apply_trade_close(w, pnl, exit_ts)
         wallet_mod.save(state_dir, w)

@@ -33,11 +33,30 @@ def write_json_atomic(path: Path | str, data: Any) -> None:
 
 
 def append_csv(path: Path | str, row: dict) -> None:
+    """Anexa una fila a un CSV con seguridad de esquema.
+
+    Si el archivo no existe -> escribe header + fila.
+    Si existe y el header coincide con las columnas de la fila -> append rapido.
+    Si el header NO coincide (p.ej. un reset previo creo el archivo con otras
+    columnas) -> reescribe alineando por nombre (union), evitando que las filas
+    queden desalineadas bajo un header equivocado.
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame([row])
-    header = not p.exists()
-    df.to_csv(p, mode="a", header=header, index=False)
+    new = pd.DataFrame([row])
+    if not p.exists():
+        new.to_csv(p, index=False)
+        return
+    try:
+        existing_cols = pd.read_csv(p, nrows=0).columns.tolist()
+    except Exception:
+        existing_cols = []
+    if existing_cols == list(new.columns):
+        new.to_csv(p, mode="a", header=False, index=False)
+    else:
+        old = pd.read_csv(p) if existing_cols else pd.DataFrame()
+        combined = pd.concat([old, new], ignore_index=True, sort=False)
+        combined.to_csv(p, index=False)
 
 
 def append_parquet(path: Path | str, row: dict) -> None:
