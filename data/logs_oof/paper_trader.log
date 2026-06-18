@@ -307977,3 +307977,225 @@
 2026-06-18 14:17:32,384 | INFO    | paper_trader           | [4h] Diagnostics: {'timeframe': '4h', 'vol_pred': 0.013552780855189052, 'vol_decile': 4, 'n_candidates_initial': 10, 'p_win_max': 0.44805610179901123, 'p_win_min': 0.2950819730758667, 'EV_max': -0.0021272070418395387, 'n_in_band': 0, 'reason_no_signal': 'NO_CANDIDATE_IN_PROB_BAND'}
 2026-06-18 14:17:32,390 | INFO    | paper_trader           | [4h] NO_SIGNAL: NO_CANDIDATE_IN_PROB_BAND
 2026-06-18 14:17:32,441 | INFO    | paper_trader           | Paper tick end.
+2026-06-18 14:21:38,668 | INFO    | paper_trader           | ============================================================
+2026-06-18 14:21:38,668 | INFO    | paper_trader           | Paper tick start (dry_run=False)
+2026-06-18 14:21:38,669 | INFO    | paper_trader           | Timeframes due: [('15m', True, False), ('1h', True, False), ('4h', True, False)]
+2026-06-18 14:21:40,484 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:40,485 | WARNING | paper_trader.binance_spot | Binance Spot failed for BTCUSDT 4h: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:40,933 | WARNING | paper_trader.binance_spot | Using Coinbase fallback for BTCUSDT 4h
+2026-06-18 14:21:42,880 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:42,881 | WARNING | paper_trader.binance_spot | Binance Spot failed for BTCUSDT 1m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:43,048 | WARNING | paper_trader.binance_spot | Using Coinbase fallback for BTCUSDT 1m
+2026-06-18 14:21:44,866 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:44,866 | WARNING | paper_trader.binance_spot | Binance ticker failed for BTCUSDT: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:46,705 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:46,706 | WARNING | paper_trader.binance_spot | Binance Spot failed for BTCUSDT 1h: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:46,859 | WARNING | paper_trader.binance_spot | Using Coinbase fallback for BTCUSDT 1h
+2026-06-18 14:21:48,679 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:48,679 | WARNING | paper_trader.binance_spot | Binance ticker failed for BTCUSDT: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:48,711 | INFO    | paper_trader           | Closed positions this tick: 0
+2026-06-18 14:21:48,711 | INFO    | paper_trader           | Macro cache has 72 features cached
+2026-06-18 14:21:48,712 | INFO    | paper_trader           | Building live features (grid 15m, compartido)...
+2026-06-18 14:21:48,712 | INFO    | paper_trader.feature_builder | Fetching 15m klines (1600 candles) for 5 symbols...
+2026-06-18 14:21:50,520 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:50,521 | WARNING | paper_trader.binance_spot | Binance paginated failed for BTCUSDT 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:52,350 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:52,350 | WARNING | paper_trader.binance_spot | Binance Spot failed for BTCUSDT 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:52,756 | WARNING | paper_trader.binance_spot | Using Coinbase fallback for BTCUSDT 15m
+2026-06-18 14:21:54,557 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:54,557 | WARNING | paper_trader.binance_spot | Binance paginated failed for ETHUSDT 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:56,375 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:56,375 | WARNING | paper_trader.binance_spot | Binance Spot failed for ETHUSDT 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:56,756 | WARNING | paper_trader.binance_spot | Using Coinbase fallback for ETHUSDT 15m
+2026-06-18 14:21:58,583 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:21:58,583 | WARNING | paper_trader.binance_spot | Binance paginated failed for ETHBTC 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:00,389 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:00,389 | WARNING | paper_trader.binance_spot | Binance Spot failed for ETHBTC 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:02,205 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:02,206 | WARNING | paper_trader.binance_spot | Binance paginated failed for XRPUSDT 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:04,019 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:04,019 | WARNING | paper_trader.binance_spot | Binance Spot failed for XRPUSDT 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:05,830 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:05,830 | WARNING | paper_trader.binance_spot | Binance paginated failed for XRPBTC 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:07,657 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:07,657 | WARNING | paper_trader.binance_spot | Binance Spot failed for XRPBTC 15m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-18 14:22:07,658 | INFO    | paper_trader.feature_builder | Spot sources: {'BTCUSDT': 'coinbase', 'ETHUSDT': 'coinbase', 'ETHBTC': 'empty', 'XRPUSDT': 'empty', 'XRPBTC': 'empty'}
+2026-06-18 14:22:07,713 | WARNING | paper_trader.feature_builder | Failed ohlcv_btc_futures_close: 451 Client Error:  for url: https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=15m&limit=1000
+2026-06-18 14:22:07,772 | WARNING | paper_trader.feature_builder | Failed ohlcv_btc_mark_price: 451 Client Error:  for url: https://fapi.binance.com/fapi/v1/markPriceKlines?symbol=BTCUSDT&interval=15m&limit=1000
+2026-06-18 14:22:07,802 | WARNING | paper_trader.feature_builder | Failed ohlcv_btc_index_price: 451 Client Error:  for url: https://fapi.binance.com/fapi/v1/indexPriceKlines?pair=BTCUSDT&interval=15m&limit=1000
+2026-06-18 14:22:07,982 | INFO    | paper_trader.feature_builder | Built 428 features over 1600 candles (grid 15m)
+2026-06-18 14:22:07,983 | INFO    | paper_trader           | [15m] Last 15m candle: 2026-06-18 14:00:00, close=63701.99
+2026-06-18 14:22:07,985 | INFO    | paper_trader           | [15m] vol_pred=0.003561 -> decile=5
+2026-06-18 14:22:07,996 | INFO    | paper_trader.regime    | Regime: lateral (close=63701.99, ema50=64796.20, ema200=64660.88)
+2026-06-18 14:22:07,996 | INFO    | paper_trader           | [15m] Regime: lateral
+2026-06-18 14:22:07,996 | INFO    | paper_trader           | [15m] Regime 'lateral' enabled: threshold=0.55, leverage=5.0x
+2026-06-18 14:22:08,024 | WARNING | paper_trader.inference | Missing 189 features (filling NaN). First: ['ohlcv_ethbtc_open', 'ohlcv_ethbtc_high', 'ohlcv_ethbtc_low', 'ohlcv_ethbtc_close', 'ohlcv_ethbtc_volume']
+2026-06-18 14:22:08,030 | INFO    | paper_trader           | [15m] Diagnostics: {'timeframe': '15m', 'vol_pred': 0.003560922567277088, 'vol_decile': 5, 'n_candidates_initial': 10, 'p_win_max': 0.458119660615921, 'p_win_min': 0.2693069279193878, 'EV_max': -0.000939050992581406, 'n_in_band': 0, 'reason_no_signal': 'NO_CANDIDATE_IN_PROB_BAND'}
+2026-06-18 14:22:08,035 | INFO    | paper_trader           | [15m] NO_SIGNAL: NO_CANDIDATE_IN_PROB_BAND
+2026-06-18 14:22:08,036 | INFO    | paper_trader           | [1h] Last 15m candle: 2026-06-18 14:00:00, close=63701.99
+2026-06-18 14:22:08,038 | INFO    | paper_trader           | [1h] vol_pred=0.006751 -> decile=5
+2026-06-18 14:22:08,049 | INFO    | paper_trader.regime    | Regime: lateral (close=63701.99, ema50=64796.20, ema200=64660.88)
+2026-06-18 14:22:08,049 | INFO    | paper_trader           | [1h] Regime: lateral
+2026-06-18 14:22:08,049 | INFO    | paper_trader           | [1h] Regime 'lateral' enabled: threshold=0.55, leverage=3.0x
+2026-06-18 14:22:08,068 | WARNING | paper_trader.inference | Missing 189 features (filling NaN). First: ['ohlcv_ethbtc_open', 'ohlcv_ethbtc_high', 'ohlcv_ethbtc_low', 'ohlcv_ethbtc_close', 'ohlcv_ethbtc_volume']
+2026-06-18 14:22:08,074 | INFO    | paper_trader           | [1h] Diagnostics: {'timeframe': '1h', 'vol_pred': 0.00675129986942344, 'vol_decile': 5, 'n_candidates_initial': 10, 'p_win_max': 0.49194955825805664, 'p_win_min': 0.3679791986942291, 'EV_max': -0.00047262859781213346, 'n_in_band': 0, 'reason_no_signal': 'NO_CANDIDATE_IN_PROB_BAND'}
+2026-06-18 14:22:08,078 | INFO    | paper_trader           | [1h] NO_SIGNAL: NO_CANDIDATE_IN_PROB_BAND
+2026-06-18 14:22:08,078 | INFO    | paper_trader           | [4h] Last 15m candle: 2026-06-18 14:00:00, close=63701.99
+2026-06-18 14:22:08,081 | INFO    | paper_trader           | [4h] vol_pred=0.013553 -> decile=4
+2026-06-18 14:22:08,091 | INFO    | paper_trader.regime    | Regime: lateral (close=63701.99, ema50=64796.20, ema200=64660.88)
+2026-06-18 14:22:08,091 | INFO    | paper_trader           | [4h] Regime: lateral
+2026-06-18 14:22:08,091 | INFO    | paper_trader           | [4h] Regime 'lateral' enabled: threshold=0.55, leverage=5.0x
+2026-06-18 14:22:08,108 | WARNING | paper_trader.inference | Missing 189 features (filling NaN). First: ['ohlcv_ethbtc_open', 'ohlcv_ethbtc_high', 'ohlcv_ethbtc_low', 'ohlcv_ethbtc_close', 'ohlcv_ethbtc_volume']
+2026-06-18 14:22:08,113 | INFO    | paper_trader           | [4h] Diagnostics: {'timeframe': '4h', 'vol_pred': 0.013552780855189052, 'vol_decile': 4, 'n_candidates_initial': 10, 'p_win_max': 0.44805610179901123, 'p_win_min': 0.2950819730758667, 'EV_max': -0.0021272070418395387, 'n_in_band': 0, 'reason_no_signal': 'NO_CANDIDATE_IN_PROB_BAND'}
+2026-06-18 14:22:08,118 | INFO    | paper_trader           | [4h] NO_SIGNAL: NO_CANDIDATE_IN_PROB_BAND
+2026-06-18 14:22:08,155 | INFO    | paper_trader           | Paper tick end.
