@@ -56,7 +56,15 @@ yahoo_macro:
     silver: "SI=F"
     oil: "CL=F"
     copper: "HG=F"
+    arkk: "ARKK"    # growth/innovacion (top feature en CV03) -> ext_arkk_*, macro_arkk_return_1d
+    soxx: "SOXX"    # semiconductores -> ext_soxx_*, macro_soxx_return_1d
+    semi: "SMH"     # semis (iShares) -> macro_semi_return_1d
   refresh_interval_hours: 1   # solo intenta cada hora; fuera de mercado US dara NaN
+
+# CoinGecko /global: market cap total y dominancia crypto (sin key)
+coingecko:
+  global_url: "https://api.coingecko.com/api/v3/global"
+  refresh_interval_hours: 6
 
 fred:
   base_url: "https://api.stlouisfed.org/fred/series/observations"
