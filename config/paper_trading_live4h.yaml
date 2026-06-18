@@ -1,0 +1,83 @@
+# ============================================================
+# Bot LIVE en Bitget USDT-M Futures - SOLO 4h (modelo OOF)
+# ============================================================
+
+version: "live4h_v1"
+mode: "live"                # dispara codigo real, no paper
+execution_market: "bitget_usdtm_futures"
+broker: "bitget"            # selector del broker en run_paper_tick
+
+# Capital inicial declarado (el equity real se lee de Bitget en cada tick)
+wallets:
+  "15m":
+    initial_capital_eur: 100.0
+    enabled: false           # 15m DESACTIVADO
+  "1h":
+    initial_capital_eur: 100.0
+    enabled: false           # 1h DESACTIVADO
+  "4h":
+    initial_capital_eur: 48.64    # capital inicial real declarado
+    enabled: true
+
+allow_cross_timeframe_positions: false
+max_positions_per_wallet: 1
+
+# Reglas 4h del bot OOF: alcista 2x, bajista 2x, lateral 5x (umbral p>=0.55)
+regime_rules:
+  "4h":
+    alcista:
+      enabled: true
+      threshold: 0.55
+      leverage: 2.0
+    bajista:
+      enabled: true
+      threshold: 0.55
+      leverage: 2.0
+    lateral:
+      enabled: true
+      threshold: 0.55
+      leverage: 5.0
+
+allow_above_band: true
+require_positive_ev: false
+
+costs:
+  # Bitget USDT-M Futures (taker): ~0.06% entrada + 0.06% salida
+  fee_in: 0.0006
+  fee_out: 0.0006
+  total_round_trip: 0.0012
+
+signal_mode: "closed_candle_only"
+selection_policy: "top_EV_per_timeframe"
+allowed_sides: ["long", "short"]
+
+scheduler:
+  run_every_minutes: 5
+  candle_close_delay_seconds:
+    "15m": 20
+    "1h": 30
+    "4h": 60
+  max_late_minutes:
+    "15m": 12
+    "1h": 45
+    "4h": 180
+
+feature_mode: "live_recompute"
+external_artifacts_path: ""
+feature_nan_policy: "tolerate"
+
+# Kill switch: si equity de la cuenta cae bajo este nivel (USDT), el bot
+# se detiene y crea data/state_live4h/KILL_SWITCH_TRIGGERED.
+# 48.64 EUR * 0.75 ~= 36 USDT (-25%)
+kill_switch:
+  enabled: true
+  min_equity_usdt: 36.0
+
+stop_conditions:
+  consecutive_losses_max: 5
+  daily_drawdown_max: -0.15
+  weekly_drawdown_max: -0.25
+
+bitget:
+  symbol: "BTCUSDT"
+  margin_mode: "crossed"

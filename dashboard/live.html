@@ -2,24 +2,30 @@
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<title>MODELO OOF - Paper Trader</title>
+<title>MODELO EN PRODUCCION - Bitget Live</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <script>document.write('<link rel="stylesheet" href="styles.css?v=' + Date.now() + '" />');</script>
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
-<script>window.DATA_DIR = "data_oof";</script>
+<script>window.DATA_DIR = "data_live4h";</script>
 </head>
 <body>
 <nav class="tabs" style="display:flex;gap:8px;padding:10px 16px;border-bottom:1px solid #2a2a3a;background:#15151f;position:sticky;top:0;z-index:50">
   <a href="index.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:transparent;color:#aab;border:1px solid #2a2a3a">Modelo actual</a>
-  <a href="oof.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:#8e44ef;color:#fff">MODELO OOF</a>
-  <a href="live.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:transparent;color:#ffd166;border:1px solid #ffd166">MODELO EN PRODUCCION</a>
+  <a href="oof.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:transparent;color:#aab;border:1px solid #2a2a3a">MODELO OOF</a>
+  <a href="live.html" style="padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:600;background:#ffd166;color:#15151f">MODELO EN PRODUCCION</a>
 </nav>
+
+<div style="background:#3a1a1a;border:1px solid #d62728;border-radius:8px;padding:10px 16px;margin:10px 16px;color:#ffcccc;font-size:13px">
+  <b style="color:#ff6b6b">[OPERATIVA REAL]</b> Bot conectado a Bitget USDT-M Futures (BTCUSDT). Las operaciones de esta pestana son con DINERO REAL.
+  Solo opera el modelo OOF en 4h, leverage 2x base / 5x lateral, kill switch a 36 USDT.
+</div>
+
 <header>
   <div class="header-row">
     <div>
-      <h1>MODELO OOF &mdash; Paper Trader</h1>
-      <p>Modelo OOF (walk-forward, train &le; 2025-12-31) - XGBoost label_win - calibracion isotonic.
-      Reglas: 1h leverage 3x | 4h 2x (lateral 5x) | 15m 1x (lateral 5x). Umbral p_win &ge; 0.55.</p>
+      <h1>MODELO EN PRODUCCION &mdash; Bitget Live</h1>
+      <p>Modelo OOF (deploy2026, train &le; 2025-12-31). Solo 4h. Reglas: alcista 2x | bajista 2x | lateral 5x.
+      Umbral p_win &ge; 0.55. Capital inicial declarado: 48.64 EUR.</p>
       <p id="generated-at" class="muted"></p>
     </div>
     <div class="live-price">
@@ -42,9 +48,9 @@
     <div id="live-tf-buttons" class="tf-buttons">
       <button data-tf="1m" class="tf-btn">1m</button>
       <button data-tf="5m" class="tf-btn">5m</button>
-      <button data-tf="15m" class="tf-btn active">15m</button>
+      <button data-tf="15m" class="tf-btn">15m</button>
       <button data-tf="1h" class="tf-btn">1h</button>
-      <button data-tf="4h" class="tf-btn">4h</button>
+      <button data-tf="4h" class="tf-btn active">4h</button>
       <button data-tf="1d" class="tf-btn">1d</button>
     </div>
   </div>
@@ -68,15 +74,15 @@
 
 <section class="grid-3">
   <div class="card">
-    <h3>Estrategia 15m <span class="muted small">(velas 15m + trades)</span></h3>
+    <h3>Estrategia 15m <span class="muted small">(deshabilitado)</span></h3>
     <div id="chart-tf-15m" class="chart-small"></div>
   </div>
   <div class="card">
-    <h3>Estrategia 1h <span class="muted small">(velas 1h + trades)</span></h3>
+    <h3>Estrategia 1h <span class="muted small">(deshabilitado)</span></h3>
     <div id="chart-tf-1h" class="chart-small"></div>
   </div>
   <div class="card">
-    <h3>Estrategia 4h <span class="muted small">(velas 4h + trades)</span></h3>
+    <h3>Estrategia 4h <span class="muted small">(ACTIVA - operativa real)</span></h3>
     <div id="chart-tf-4h" class="chart-small"></div>
   </div>
 </section>
@@ -84,24 +90,22 @@
 <section class="grid-3">
   <div class="card"><h3>Equity 15m</h3><div id="chart-eq-15m" class="chart-eq"></div></div>
   <div class="card"><h3>Equity 1h</h3><div id="chart-eq-1h" class="chart-eq"></div></div>
-  <div class="card"><h3>Equity 4h</h3><div id="chart-eq-4h" class="chart-eq"></div></div>
+  <div class="card"><h3>Equity 4h (REAL)</h3><div id="chart-eq-4h" class="chart-eq"></div></div>
 </section>
 
 <section class="card">
-  <h3>Posiciones abiertas</h3>
+  <h3>Posiciones abiertas en Bitget</h3>
   <div id="open-positions"></div>
-  <p class="muted small">Bot del MODELO OOF. Opera con precios de Coinbase (BTC-USD) cuando Binance
-  bloquea los runners de GitHub; las graficas muestran Binance desde tu navegador.</p>
+  <p class="muted small">Cada posicion abierta tiene TP/SL colocados como ordenes condicionales en Bitget,
+  asi se respetan aunque el bot caiga. El bot tambien intenta cerrar por TP/SL/TIMEOUT en cada tick.</p>
 </section>
 
 <section class="card">
   <div class="card-header">
-    <h3>Operaciones realizadas</h3>
+    <h3>Operaciones realizadas (Bitget real)</h3>
     <div class="toolbar">
       <div class="tf-buttons" data-target="trades">
         <button data-tf="all" class="tf-btn active">Todas</button>
-        <button data-tf="15m" class="tf-btn">15m</button>
-        <button data-tf="1h" class="tf-btn">1h</button>
         <button data-tf="4h" class="tf-btn">4h</button>
       </div>
       <div class="pager" data-target="trades">
@@ -116,12 +120,10 @@
 
 <section class="card">
   <div class="card-header">
-    <h3>Historial de senales <span class="muted small">(en el cierre de la vela t se pregunta al modelo OOF; si dice SI se opera en la apertura de t+1)</span></h3>
+    <h3>Historial de senales <span class="muted small">(modelo OOF, decisiones que se TRADUCEN en ordenes Bitget)</span></h3>
     <div class="toolbar">
       <div class="tf-buttons" data-target="signals">
         <button data-tf="all" class="tf-btn active">Todas</button>
-        <button data-tf="15m" class="tf-btn">15m</button>
-        <button data-tf="1h" class="tf-btn">1h</button>
         <button data-tf="4h" class="tf-btn">4h</button>
       </div>
       <div class="pager" data-target="signals">

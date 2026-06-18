@@ -1,0 +1,36 @@
+# Strategy del bot LIVE 4h - usa el MISMO modelo OOF/deploy2026 que el bot OOF.
+model:
+  approach: "OOF"
+  model_filename: "oof_{tf}.json"
+  calibration_method: "isotonic"
+  calibration_filename: "calib_oof_compact.json"
+  models_dir: "artifacts/models_oof"
+  calibration_dir: "artifacts/calibration"
+  schemas_dir: "artifacts/schemas"
+
+candidates:
+  library_filename: "barrier_candidate_library_{tf}.parquet"
+  library_dir: "artifacts/candidates"
+  top_k_per_decile_side: 5
+
+ev:
+  cost_round_trip: 0.0012
+  formula: "p_win_calibrated * tp_pct - (1.0 - p_win_calibrated) * sl_pct - cost_round_trip"
+
+timeframe_minutes:
+  "15m": 15
+  "1h": 60
+  "4h": 240
+
+entry:
+  preferred: "open_t_plus_1"
+  fallback: "current_ticker"
+  ticker_endpoint: "/api/v3/ticker/price?symbol=BTCUSDT"
+
+exit_reasons: ["TP", "SL", "TIMEOUT", "MANUAL", "ERROR"]
+intrabar_conflict_rule: "SL_first"
+
+volatility:
+  method: "ewma_true_range"
+  ewma_span: 20
+  decile_bounds_path: "artifacts/schemas/vol_decile_bounds.json"

@@ -31,7 +31,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import load_config
 from src.data import binance_spot as bspot
 from src.execution import exits as exits_mod
-from src.execution import paper_broker
+from src.execution import paper_broker as _paper_broker_mod
+
+
+def _select_broker(cfg):
+    """Selecciona el broker segun config: 'bitget' = LIVE real, resto = paper."""
+    name = (cfg.paper.get("broker") or "paper").lower()
+    if name == "bitget":
+        from src.execution import bitget_broker as _b
+        return _b
+    return _paper_broker_mod
+
+
+paper_broker = None   # se asigna en run_tick() segun cfg
 from src.features.live_feature_builder import build_live_features
 from src.features.macro_cache import load_cache, to_feature_dict
 from src.features.regime import classify_regime
@@ -72,8 +84,22 @@ def run_tick(cfg, args) -> int:
     log = setup_logger(cfg.logs_dir / "paper_trader.log",
                        level=logging.INFO)
     log.info("=" * 60)
-    log.info("Paper tick start (dry_run=%s)", args.dry_run)
+    log.info("Paper tick start (dry_run=%s, profile=%s)", args.dry_run, cfg.profile)
     cfg.ensure_runtime_dirs()
+
+    # Broker selector + kill switch para perfil live
+    global paper_broker
+    paper_broker = _select_broker(cfg)
+    is_live = (cfg.paper.get("broker") or "").lower() == "bitget"
+    if is_live:
+        ks_cfg = cfg.paper.get("kill_switch") or {}
+        if ks_cfg.get("enabled", True):
+            killed, eq = paper_broker.check_kill_switch(
+                cfg.state_dir, float(ks_cfg.get("min_equity_usdt", 0.0)))
+            if killed:
+                log.error("LIVE bot detenido por kill switch (equity=%.2f). Saliendo.", eq)
+                return 0
+            log.info("LIVE bot OK. Equity Bitget: %.2f USDT", eq)
 
     # Diagnostics que SIEMPRE se escriben (incluso en error) para que el
     # repo refleje cada tick aunque no haya nada que commitear de trades.

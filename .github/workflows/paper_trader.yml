@@ -84,6 +84,24 @@ jobs:
           if [ -n "${{ inputs.force_tf }}" ]; then ARGS="$ARGS --force-tf ${{ inputs.force_tf }}"; fi
           python scripts/run_paper_tick.py $ARGS
 
+      - name: Run paper tick (MODELO EN PRODUCCION - Bitget LIVE 4h)
+        if: always()
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}
+          BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
+          BITGET_PASSPHRASE: ${{ secrets.BITGET_PASSPHRASE }}
+        run: |
+          # Solo correr si los 3 secretos Bitget estan presentes (evita crashear el job)
+          if [ -z "$BITGET_API_KEY" ] || [ -z "$BITGET_API_SECRET" ] || [ -z "$BITGET_PASSPHRASE" ]; then
+            echo "::warning::Bitget secrets ausentes; saltando bot LIVE 4h"
+            exit 0
+          fi
+          ARGS="--profile live4h"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "${{ inputs.force_tf }}" ]; then ARGS="$ARGS --force-tf ${{ inputs.force_tf }}"; fi
+          python scripts/run_paper_tick.py $ARGS
+
       - name: Show last_tick.json (debug)
         if: always()
         run: |
@@ -104,7 +122,8 @@ jobs:
           git config user.name  "paper-trader-bot"
           git config user.email "paper-trader-bot@users.noreply.github.com"
           git add -A data/state data/paper_trades data/logs dashboard/data \
-                     data/state_oof data/paper_trades_oof data/logs_oof dashboard/data_oof || true
+                     data/state_oof data/paper_trades_oof data/logs_oof dashboard/data_oof \
+                     data/state_live4h data/paper_trades_live4h data/logs_live4h dashboard/data_live4h || true
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
