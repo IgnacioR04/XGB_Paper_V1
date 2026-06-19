@@ -196,7 +196,8 @@ def run_tick(cfg, args) -> int:
                     rolling_history=max(
                         cfg.data_sources["binance_spot"]
                         ["rolling_history_candles"], 1600),
-                    macro_cache=macro_features)
+                    macro_cache=macro_features,
+                    cache_obj=cache)
             except Exception as e:
                 log.error("Feature build failed: %s", e)
                 diag_payload["tf_results"][tf] = {

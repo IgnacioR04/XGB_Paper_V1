@@ -199,3 +199,37 @@ class BitgetClient:
         if isinstance(d, list) and d:
             return float(d[0]["lastPr"])
         return float(d.get("lastPr"))
+
+    def funding_rate_history(self, symbol: str = "BTCUSDT",
+                             page_size: int = 100) -> list[dict]:
+        """Historico de funding rate (publico, sin auth). Bitget liquida cada 8h.
+
+        Devuelve lista de {fundingRate, fundingTime(ms)} ordenada por tiempo asc.
+        Se usa en vivo porque Binance fapi esta geo-bloqueado en los runners.
+        """
+        r = requests.get(f"{BASE_URL}/api/v2/mix/market/history-fund-rate",
+                          params={"symbol": symbol, "productType": PRODUCT_TYPE,
+                                  "pageSize": int(page_size)},
+                          timeout=self.timeout)
+        r.raise_for_status()
+        data = r.json().get("data") or []
+        out = []
+        for it in data:
+            try:
+                out.append({"fundingRate": float(it["fundingRate"]),
+                            "fundingTime": int(it["fundingTime"])})
+            except (KeyError, TypeError, ValueError):
+                continue
+        out.sort(key=lambda x: x["fundingTime"])
+        return out
+
+    def current_funding_rate(self, symbol: str = "BTCUSDT") -> float:
+        """Funding rate actual (publico)."""
+        r = requests.get(f"{BASE_URL}/api/v2/mix/market/current-fund-rate",
+                          params={"symbol": symbol, "productType": PRODUCT_TYPE},
+                          timeout=self.timeout)
+        r.raise_for_status()
+        d = r.json().get("data") or []
+        if isinstance(d, list) and d:
+            return float(d[0]["fundingRate"])
+        return float(d.get("fundingRate"))

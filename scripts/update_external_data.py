@@ -11,6 +11,8 @@ import datetime as dt
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import load_config
@@ -21,7 +23,7 @@ from src.data import cryptocompare as cc
 from src.data import fear_greed as fg
 from src.data import fred_client as fred
 from src.data import yahoo_macro as yahoo
-from src.features.macro_cache import load_cache, save_cache, update_value
+from src.features.macro_cache import load_cache, save_cache, update_value, update_series
 from src.utils.logging_utils import setup_logger
 
 
@@ -198,17 +200,63 @@ def update_crypto_mcap(cache: dict, log) -> None:
 
 
 def update_funding(cache: dict, log) -> None:
+    """Funding rate desde Bitget (Binance fapi esta geo-bloqueado en runners).
+
+    Guarda el escalar (nivel) Y la serie 8h corta para que el builder pueda
+    derivar lag/roll de der_funding_rate.
+    """
     try:
-        df = bfut.fetch_funding_rate("BTCUSDT", limit=10)
-        if df.empty:
+        from src.data.bitget_client import BitgetClient
+        c = BitgetClient()
+        hist = c.funding_rate_history("BTCUSDT", page_size=100)
+        if not hist:
+            log.warning("Bitget funding history vacio")
             return
-        last = df.iloc[-1]
-        update_value(cache, "der_funding_rate", float(last["funding_rate"]), "binance_fut")
-        update_value(cache, "der_funding_annualized",
-                      float(last["funding_rate"]) * 3 * 365, "binance_fut")
-        log.info("Funding updated: %.6f", last["funding_rate"])
+        last_rate = float(hist[-1]["fundingRate"])
+        update_value(cache, "der_funding_rate", last_rate, "bitget")
+        update_value(cache, "der_funding_annualized", last_rate * 3 * 365, "bitget")
+        # serie [(iso, valor)] para lag/roll
+        pts = [(dt.datetime.utcfromtimestamp(h["fundingTime"] / 1000)
+                .replace(tzinfo=dt.timezone.utc).isoformat(), h["fundingRate"])
+               for h in hist]
+        update_series(cache, "der_funding_rate", pts, "bitget")
+        log.info("Funding (Bitget) updated: %.6f (%d pts hist)", last_rate, len(pts))
     except Exception as e:
         log.error("Funding failed: %s", e)
+
+
+def update_base_series_history(cache: dict, log) -> None:
+    """Guarda la historia diaria de VIX/NDX/SPX para que el builder derive
+    macro_vix(lag/roll), macro_ndx_return_1d(lag/roll), reg_* y interacciones.
+
+    El escalar no basta: lag/roll necesitan la variacion dia a dia. Yahoo da
+    histgrico diario gratis (funciona en runners de GitHub)."""
+    try:
+        specs = {"macro_vix": "^VIX", "macro_ndx_price": "^IXIC",
+                 "macro_spx_price": "^GSPC"}
+        for key, ticker in specs.items():
+            df = yahoo.fetch_ticker_history(ticker, period="90d", interval="1d")
+            if df is None or df.empty or "close" not in df.columns:
+                log.warning("Yahoo history vacio para %s", ticker)
+                continue
+            # construir [(iso, close)] usando la columna de fecha
+            tcol = "time" if "time" in df.columns else (
+                "date" if "date" in df.columns else None)
+            pts = []
+            for _, row in df.iterrows():
+                ts = row[tcol] if tcol else None
+                cv = row["close"]
+                if ts is None or cv != cv:
+                    continue
+                iso = pd.Timestamp(ts).tz_convert("UTC").isoformat() \
+                    if pd.Timestamp(ts).tzinfo else \
+                    pd.Timestamp(ts).tz_localize("UTC").isoformat()
+                pts.append((iso, float(cv)))
+            if pts:
+                update_series(cache, key, pts, "yahoo")
+        log.info("Base series history updated (vix/ndx/spx)")
+    except Exception as e:
+        log.error("Base series history failed: %s", e)
 
 
 def main() -> int:
@@ -228,6 +276,7 @@ def main() -> int:
     update_cryptocompare(cache, log, ds["cryptocompare"]["coins"])
     update_crypto_mcap(cache, log)   # tras cryptocompare (usa sus closes para ratios)
     update_funding(cache, log)
+    update_base_series_history(cache, log)   # historia vix/ndx/spx para lag/roll
 
     cache["updated_at"] = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc).isoformat()
     save_cache(cfg.data_dir, cache)

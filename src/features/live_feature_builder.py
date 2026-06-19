@@ -51,7 +51,8 @@ def _kline_to_ohlcv_prefix(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
 
 def build_live_features(timeframe: str = "15m",
                         rolling_history: int = MIN_HISTORY_15M,
-                        macro_cache: dict | None = None) -> pd.DataFrame:
+                        macro_cache: dict | None = None,
+                        cache_obj: dict | None = None) -> pd.DataFrame:
     """Construye el frame de features sobre el GRID DE 15M.
 
     El argumento `timeframe` se conserva por compatibilidad pero las
@@ -137,16 +138,29 @@ def build_live_features(timeframe: str = "15m",
         feats["inter_logret_minus_ethrelstr"] = (
             feats["ret_log_return"] - feats["ohlcv_eth_rel_strength"])
 
-    # Calendario
+    # Calendario (22 features, incluye eventos macro/crypto - sin datos externos)
     feats = feats.join(cal_mod.compute_calendar(feats.index))
 
-    # Macro cache (broadcast del ultimo valor)
+    # Macro cache (broadcast del ultimo valor escalar: niveles ext_/cx_/sent_/
+    # oc_/macro_ que cambian a baja frecuencia)
     if macro_cache:
         for k, v in macro_cache.items():
             feats[k] = v
-        if "macro_ndx_return_1d" in feats:
-            feats["inter_logret_minus_ndx"] = (
-                feats["ret_log_return"] - feats["macro_ndx_return_1d"])
+
+    # Derivadas de series base (lag/roll T13, interacciones, regimen T11) a
+    # partir de la historia corta guardada en el cache. Esto sustituye el
+    # broadcast escalar de funding/VIX/NDX por la serie real reindexada al
+    # grid 15m, lo unico que permite calcular lag/roll correctamente.
+    if cache_obj is not None:
+        try:
+            from . import derivatives as deriv_mod
+            deriv = deriv_mod.compute_derivatives(feats, cache_obj)
+            # Las derivadas tienen prioridad sobre el broadcast escalar previo
+            feats = feats.drop(columns=[c for c in deriv.columns if c in feats.columns],
+                               errors="ignore")
+            feats = pd.concat([feats, deriv], axis=1)
+        except Exception as e:
+            log.warning("compute_derivatives failed (siguen NaN): %s", e)
 
     log.info("Built %d features over %d candles (grid 15m)",
              feats.shape[1], len(feats))

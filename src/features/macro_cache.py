@@ -53,3 +53,30 @@ def mark_stale(cache: dict, key: str) -> None:
 def to_feature_dict(cache: dict) -> dict[str, float]:
     """Devuelve solo el dict de valores plano para broadcastear en features."""
     return dict(cache.get("values", {}))
+
+
+def update_series(cache: dict, key: str,
+                  points: list[tuple[str, float]], source: str) -> None:
+    """Guarda una serie temporal corta [(iso, valor), ...] de una variable base.
+
+    Se usa para las series que necesitan derivadas lag/roll (funding, VIX, NDX):
+    el escalar no basta, hace falta la historia para reindexar al grid 15m y
+    calcular lag/roll. `points` debe venir ordenado por tiempo ascendente.
+    """
+    clean = []
+    for ts, v in points:
+        try:
+            clean.append([str(ts), float(v)])
+        except (TypeError, ValueError):
+            continue
+    cache.setdefault("series", {})[key] = clean
+    cache.setdefault("meta", {})[f"series:{key}"] = {
+        "source": source,
+        "fetched_at": dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc).isoformat(),
+        "n": len(clean),
+    }
+
+
+def get_series(cache: dict, key: str) -> list[list]:
+    """Devuelve la serie [(iso, valor), ...] guardada o lista vacia."""
+    return cache.get("series", {}).get(key, [])
