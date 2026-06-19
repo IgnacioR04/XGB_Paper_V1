@@ -96,9 +96,20 @@ def check_kill_switch(state_dir: Path, min_equity_usdt: float) -> tuple[bool, fl
 
 
 def _round_size(size_btc: float) -> float:
-    # Bitget BTCUSDT perpetuo: 3 decimales en size
-    s = round(size_btc, 3)
-    return max(s, MIN_SIZE_BTC) if s > 0 else 0.0
+    # Bitget BTCUSDT perpetuo: 3 decimales en size.
+    # FLOOR (no round) para no exceder NUNCA el presupuesto de margen:
+    # round() puede redondear hacia arriba (0.00156 -> 0.002) e inflar el
+    # notional por encima del balance disponible -> error 40762.
+    import math
+    s = math.floor(size_btc * 1000) / 1000.0
+    return s if s > 0 else 0.0
+
+
+# Fraccion del equity que arriesgamos como margen. El resto (5%) es colchon
+# para la comision de entrada (0.06% taker), el movimiento de precio entre la
+# lectura del equity y la orden, y el redondeo de tamano. Sin este colchon
+# Bitget rechaza con "The order amount exceeds the balance" (40762).
+EQUITY_SAFETY_FACTOR = 0.95
 
 
 def open_position(state_dir: Path, signal_id: str, timeframe: str, symbol: str,
@@ -123,14 +134,29 @@ def open_position(state_dir: Path, signal_id: str, timeframe: str, symbol: str,
         try: c.set_leverage(symbol, int(round(leverage)), hold_side=hs)
         except Exception as e: log.warning("set_leverage %s: %s", hs, e)
 
-    # 2) calcular size en BTC: notional_usdt = equity * leverage (notional_eur
-    #    viene ya multiplicado por leverage en run_paper_tick; lo tratamos como USDT
-    #    aproximando EUR ~ USDT en cuenta de Futures)
-    notional_usdt = float(notional_eur)
+    # 2) calcular size en BTC a partir del EQUITY REAL de la cuenta (no del
+    #    wallet de config, que puede estar desincronizado). margen disponible =
+    #    equity * SAFETY_FACTOR; notional = margen * leverage. Asi el margen
+    #    consumido nunca supera el balance y queda colchon para comisiones.
+    #    (notional_eur que llega de run_paper_tick se ignora para el sizing real
+    #    porque se calcula del wallet de config, que aqui esta desacoplado del
+    #    equity real de Bitget.)
+    try:
+        equity_usdt = c.equity_usdt(symbol)
+    except Exception as e:
+        log.warning("No se pudo leer equity para sizing (%s); uso notional_eur/leverage", e)
+        equity_usdt = float(notional_eur) / max(float(leverage), 1.0)
+    margin_usdt = equity_usdt * EQUITY_SAFETY_FACTOR
+    notional_usdt = margin_usdt * float(leverage)
     last_price = c.ticker_price(symbol)
     size_btc = _round_size(notional_usdt / last_price)
+    log.info("Sizing: equity=%.2f margin=%.2f lev=%.1fx notional=%.2f price=%.1f -> size=%.4f BTC",
+             equity_usdt, margin_usdt, leverage, notional_usdt, last_price, size_btc)
     if size_btc < MIN_SIZE_BTC:
-        raise BitgetError(f"size {size_btc} < min {MIN_SIZE_BTC}; notional={notional_usdt}")
+        raise BitgetError(
+            f"size {size_btc} < min {MIN_SIZE_BTC} BTC; equity={equity_usdt:.2f} "
+            f"lev={leverage}x notional={notional_usdt:.2f}. Capital insuficiente "
+            f"para el tamano minimo de Bitget (necesitas ~{MIN_SIZE_BTC*last_price/leverage:.0f} USDT de margen).")
 
     # 3) entrada market
     bg_side = "buy" if side == "long" else "sell"
@@ -158,7 +184,9 @@ def open_position(state_dir: Path, signal_id: str, timeframe: str, symbol: str,
         "entry_price_quality": entry_price_quality,
         "tp_price": float(tp_price), "sl_price": float(sl_price),
         "timeout_time": timeout_time.isoformat() if isinstance(timeout_time, dt.datetime) else timeout_time,
-        "notional_eur": float(notional_usdt),    # tratamos como USDT
+        # notional REAL ejecutado = size redondeado * precio (no el target, que
+        # es mayor por el floor del size). Asi el PnL cuadra con la posicion real.
+        "notional_eur": float(size_btc * last_price),    # tratamos como USDT
         "size_btc": float(size_btc),
         "leverage": float(leverage), "regime": regime,
         "p_win": float(p_win), "EV_pred": float(EV_pred),
