@@ -526,6 +526,12 @@ function renderSummary(summary) {
   const wallets = summary.wallets || {};
   for (const tf of TFS) {
     const w = wallets[tf] || {};
+    // Saltar carteras deshabilitadas (capital 0, sin trades ni posicion).
+    // En produccion 15m/1h vienen con capital 0 -> no se muestran; en OOF/main
+    // tienen 100 EUR -> se siguen mostrando las 3.
+    const disabled = (w.initial_capital_eur || 0) === 0
+      && (w.n_trades || 0) === 0 && !w.open_position_id;
+    if (disabled) continue;
     const pnl = (w.equity_eur || 100) - (w.initial_capital_eur || 100);
     const pnlClass = pnl >= 0 ? "green" : "red";
     const div = document.createElement("div");
@@ -548,6 +554,7 @@ function renderSummary(summary) {
 
 function renderOpenPositions(data) {
   const root = document.getElementById("open-positions");
+  if (!root) return;   // live.html usa el panel tipo Bitget en vez de esta tabla
   const pos = data.open_positions || [];
   if (pos.length === 0) {
     root.innerHTML = '<div class="empty">No hay posiciones abiertas.</div>';
