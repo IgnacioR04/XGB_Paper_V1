@@ -31,6 +31,16 @@
   </div>
 </header>
 
+<!-- Panel de posicion abierta (tipo Bitget). El JS solo lo rellena si hay
+     posicion abierta y solo si el div existe. -->
+<section class="card">
+  <div class="card-header">
+    <h3>Posicion abierta</h3>
+    <div class="muted small">PnL no realizado segun el ultimo precio (paper, no es Bitget)</div>
+  </div>
+  <div id="position-panel"></div>
+</section>
+
 <section id="summary-cards" class="grid-3"></section>
 
 <section class="card">

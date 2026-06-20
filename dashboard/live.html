@@ -16,16 +16,15 @@
 </nav>
 
 <div style="background:#3a1a1a;border:1px solid #d62728;border-radius:8px;padding:10px 16px;margin:10px 16px;color:#ffcccc;font-size:13px">
-  <b style="color:#ff6b6b">[OPERATIVA REAL]</b> Bot conectado a Bitget USDT-M Futures (BTCUSDT). Las operaciones de esta pestana son con DINERO REAL.
-  Solo opera el modelo OOF en 4h, leverage 2x base / 5x lateral, kill switch a 36 USDT.
+  <b style="color:#ff6b6b">[OPERATIVA REAL]</b> Bot conectado a Bitget USDT-M Futures (BTCUSDT). Operativa con DINERO REAL.
+  Solo modelo OOF en 4h. Reglas: alcista 2x, bajista 2x, lateral 5x. Kill switch a 36 USDT.
 </div>
 
 <header>
   <div class="header-row">
     <div>
       <h1>MODELO EN PRODUCCION &mdash; Bitget Live</h1>
-      <p>Modelo OOF (deploy2026, train &le; 2025-12-31). Solo 4h. Reglas: alcista 2x | bajista 2x | lateral 5x.
-      Umbral p_win &ge; 0.55. Capital inicial declarado: 48.64 EUR.</p>
+      <p>Modelo OOF (deploy2026, train &le; 2025-12-31). Solo 4h. Umbral p_win &ge; 0.55. Capital inicial: 48.64 EUR.</p>
       <p id="generated-at" class="muted"></p>
     </div>
     <div class="live-price">
@@ -37,12 +36,22 @@
   </div>
 </header>
 
+<!-- Panel de posicion abierta (tipo Bitget) -->
+<section class="card">
+  <div class="card-header">
+    <h3>Posicion abierta en Bitget</h3>
+    <div class="muted small">Se actualiza cada vez que refrescamos el precio del grafico (~5s)</div>
+  </div>
+  <div id="position-panel"></div>
+</section>
+
 <section id="summary-cards" class="grid-3"></section>
 
+<!-- Grafica grande estilo TradingView con entry/TP/SL/liquidacion -->
 <section class="card">
   <div class="card-header">
     <div>
-      <h3>Bitcoin en tiempo real</h3>
+      <h3>BTC/USDT en tiempo real</h3>
       <span id="heatmap-status" class="muted small">Heatmap de liquidez: cargando...</span>
     </div>
     <div id="live-tf-buttons" class="tf-buttons">
@@ -54,7 +63,7 @@
       <button data-tf="1d" class="tf-btn">1d</button>
     </div>
   </div>
-  <div id="chart-live" class="chart-big"></div>
+  <div id="chart-live" class="chart-big chart-xl"></div>
   <div class="heatmap-legend">
     <span class="muted small">Liquidez:</span>
     <span class="heatmap-gradient"></span>
@@ -72,32 +81,13 @@
   <div id="depth-stats" class="depth-stats"></div>
 </section>
 
-<section class="grid-3">
-  <div class="card">
-    <h3>Estrategia 15m <span class="muted small">(deshabilitado)</span></h3>
-    <div id="chart-tf-15m" class="chart-small"></div>
-  </div>
-  <div class="card">
-    <h3>Estrategia 1h <span class="muted small">(deshabilitado)</span></h3>
-    <div id="chart-tf-1h" class="chart-small"></div>
-  </div>
-  <div class="card">
-    <h3>Estrategia 4h <span class="muted small">(ACTIVA - operativa real)</span></h3>
-    <div id="chart-tf-4h" class="chart-small"></div>
-  </div>
-</section>
-
-<section class="grid-3">
-  <div class="card"><h3>Equity 15m</h3><div id="chart-eq-15m" class="chart-eq"></div></div>
-  <div class="card"><h3>Equity 1h</h3><div id="chart-eq-1h" class="chart-eq"></div></div>
-  <div class="card"><h3>Equity 4h (REAL)</h3><div id="chart-eq-4h" class="chart-eq"></div></div>
-</section>
-
+<!-- Equity 4h (unico TF activo) -->
 <section class="card">
-  <h3>Posiciones abiertas en Bitget</h3>
-  <div id="open-positions"></div>
-  <p class="muted small">Cada posicion abierta tiene TP/SL colocados como ordenes condicionales en Bitget,
-  asi se respetan aunque el bot caiga. El bot tambien intenta cerrar por TP/SL/TIMEOUT en cada tick.</p>
+  <div class="card-header">
+    <h3>Equity 4h (REAL)</h3>
+    <div class="muted small">Curva de equity de la cartera real (cierres de posicion en Bitget)</div>
+  </div>
+  <div id="chart-eq-4h" class="chart-eq"></div>
 </section>
 
 <section class="card">

@@ -568,6 +568,127 @@ function renderOpenPositions(data) {
 }
 
 // ---------------------------------------------------------------------------
+// Lineas TP/SL/Entry/Liquidacion sobre chart-live + panel estilo Bitget
+// ---------------------------------------------------------------------------
+
+// Guardamos los handles de las priceLines para poder borrarlas al refrescar.
+const POSITION_LINES = [];
+let TRACKED_POSITION = null;     // posicion abierta cuyo PnL "en vivo" pintamos
+
+function clearPositionLines() {
+  if (!charts.live || !charts.live.series) return;
+  for (const ln of POSITION_LINES) {
+    try { charts.live.series.removePriceLine(ln); } catch (e) {}
+  }
+  POSITION_LINES.length = 0;
+}
+
+// Estima el precio de liquidacion (cross margin, sin fee de mantenimiento exacto)
+// Para long: liq = entry * (1 - 1/lev). Para short: liq = entry * (1 + 1/lev).
+// Es una aproximacion (Bitget usa MMR 0.4% para BTC perpetual), pero da una
+// referencia visual util.
+function estimateLiqPrice(side, entry, lev) {
+  if (!lev || lev <= 0) return null;
+  return side === "long" ? entry * (1 - 1 / lev) : entry * (1 + 1 / lev);
+}
+
+function applyOpenPositionLines(openPositions) {
+  clearPositionLines();
+  if (!charts.live || !charts.live.series) return;
+  // Mostramos solo la posicion del TF activo en chart-live, o la primera si
+  // hay varias. En live4h solo habra una; en oof puede haber 3 (15m/1h/4h).
+  const pos = (openPositions || [])[0];
+  TRACKED_POSITION = pos || null;
+  if (!pos) return;
+
+  const liq = estimateLiqPrice(pos.side, +pos.entry_price, +pos.leverage || 1);
+  const linesSpec = [
+    { price: +pos.entry_price, color: "#9aa4bd", title: "Entry",
+      lineStyle: 2, lineWidth: 1 },
+    { price: +pos.tp_price,   color: "#3fb950", title: "TP",
+      lineStyle: 0, lineWidth: 2 },
+    { price: +pos.sl_price,   color: "#f85149", title: "SL",
+      lineStyle: 0, lineWidth: 2 },
+  ];
+  if (liq && isFinite(liq)) {
+    linesSpec.push({ price: liq, color: "#ff8e0c", title: "Liq~",
+      lineStyle: 1, lineWidth: 1 });
+  }
+  for (const spec of linesSpec) {
+    try {
+      const ln = charts.live.series.createPriceLine({
+        price: spec.price, color: spec.color, lineWidth: spec.lineWidth,
+        lineStyle: spec.lineStyle, axisLabelVisible: true, title: spec.title,
+      });
+      POSITION_LINES.push(ln);
+    } catch (e) { console.warn("priceLine fail", spec.title, e); }
+  }
+}
+
+// Tarjeta tipo Bitget: muestra side+leverage, entry, mark, PnL no realizado,
+// ROE, margen, liquidacion ~, distancia a TP/SL, timeout.
+// Se renderiza solo si la pagina trae <div id="position-panel">.
+function renderPositionPanel(openPositions, lastMarkPrice) {
+  const root = document.getElementById("position-panel");
+  if (!root) return;
+  const pos = (openPositions || [])[0];
+  if (!pos) {
+    root.innerHTML = '<div class="empty">Sin posicion abierta. El bot evaluara la proxima vela 4h cerrada.</div>';
+    return;
+  }
+  const mark = (lastMarkPrice && isFinite(lastMarkPrice)) ? +lastMarkPrice
+              : (window.__lastMark || +pos.entry_price);
+  const entry = +pos.entry_price;
+  const lev = +pos.leverage || 1;
+  const sizeBtc = +pos.size_btc || (+pos.notional_eur / entry) || 0;
+  const sign = pos.side === "long" ? 1 : -1;
+  // PnL no realizado en USDT y como % de la equity (= margen apalancado)
+  const grossPct = sign * (mark / entry - 1);             // movimiento del precio
+  const pnlUsdt = grossPct * sizeBtc * entry;             // PnL en USDT (notional inicial)
+  const margin = (sizeBtc * entry) / lev;                 // margen consumido
+  const roe = margin > 0 ? pnlUsdt / margin : 0;          // ROE de la posicion
+  const liq = estimateLiqPrice(pos.side, entry, lev);
+  const dTp = sign * (pos.tp_price / mark - 1);
+  const dSl = -sign * (mark / pos.sl_price - 1);
+  const dLiq = liq ? Math.abs(mark / liq - 1) : null;
+  const pnlColor = pnlUsdt >= 0 ? "#3fb950" : "#f85149";
+  const sideLabel = pos.side === "long"
+    ? "&#9650; LONG"
+    : "&#9660; SHORT";
+  const sideCls = pos.side === "long" ? "long" : "short";
+
+  root.innerHTML = `
+    <div class="pos-card">
+      <div class="pos-head">
+        <div class="pos-symbol">
+          <span class="pos-sym">${pos.symbol}</span>
+          <span class="pos-side ${sideCls}">${sideLabel}</span>
+          <span class="pos-lev">${lev.toFixed(0)}x</span>
+          <span class="pos-regime">${pos.regime || "-"}</span>
+          <span class="pos-tf">${pos.timeframe}</span>
+        </div>
+        <div class="pos-pnl" style="color:${pnlColor}">
+          <span class="pnl-big">${pnlUsdt >= 0 ? "+" : ""}${pnlUsdt.toFixed(4)} USDT</span>
+          <span class="pnl-roe">ROE ${roe >= 0 ? "+" : ""}${(roe * 100).toFixed(2)}%</span>
+        </div>
+      </div>
+      <div class="pos-grid">
+        <div><span class="kpi-label">Tamano</span><span class="kpi-value">${sizeBtc.toFixed(4)} BTC</span></div>
+        <div><span class="kpi-label">Margen</span><span class="kpi-value">${margin.toFixed(2)} USDT</span></div>
+        <div><span class="kpi-label">Entrada</span><span class="kpi-value">${fmtPrice(entry)}</span></div>
+        <div><span class="kpi-label">Precio justo</span><span class="kpi-value">${fmtPrice(mark)}</span></div>
+        <div><span class="kpi-label">Take Profit</span><span class="kpi-value tp">${fmtPrice(pos.tp_price)} <small>(${(dTp * 100).toFixed(2)}%)</small></span></div>
+        <div><span class="kpi-label">Stop Loss</span><span class="kpi-value sl">${fmtPrice(pos.sl_price)} <small>(${(dSl * 100).toFixed(2)}%)</small></span></div>
+        <div><span class="kpi-label">Liquidacion ~</span><span class="kpi-value">${liq ? fmtPrice(liq) : "-"} ${dLiq != null ? `<small>(${(dLiq * 100).toFixed(2)}%)</small>` : ""}</span></div>
+        <div><span class="kpi-label">Timeout</span><span class="kpi-value small">${fmtTime(pos.timeout_time)}</span></div>
+        <div><span class="kpi-label">p_win</span><span class="kpi-value">${fmtP(pos.p_win)}</span></div>
+        <div><span class="kpi-label">EV pred</span><span class="kpi-value">${fmtP(pos.EV_pred)}</span></div>
+      </div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
 // Estado de filtros + paginacion (signals/trades)
 // ---------------------------------------------------------------------------
 
@@ -719,11 +840,20 @@ async function refreshLiveChart() {
     el.textContent = fmtPrice(last.close);
     el.className = last.close >= prev.close ? "green" : "red";
     document.getElementById("live-price-source").textContent = "(" + klineSource + " " + liveTfInterval + ")";
+    // Re-pinta las priceLines (entry/TP/SL/liq) tras setData (los priceLines
+    // persisten al setData, pero los mantenemos cohesion con TRACKED_POSITION).
+    if (TRACKED_POSITION && POSITION_LINES.length === 0) {
+      applyOpenPositionLines([TRACKED_POSITION]);
+    }
+    // Actualiza panel "estilo Bitget" con el precio mas reciente (mark proxy).
+    window.__lastMark = last.close;
+    if (TRACKED_POSITION) renderPositionPanel([TRACKED_POSITION], last.close);
   } catch (e) { console.warn("live chart refresh failed", e); }
 }
 
 async function refreshTfCharts(trades, openPositions) {
   for (const tf of TFS) {
+    if (!charts[tf]) continue;   // la pagina puede no incluir el chart de este TF
     try {
       const candles = await fetchKlines(tf, 150);
       charts[tf].series.setData(candles);
@@ -745,6 +875,8 @@ async function refreshBotData() {
   ]);
   renderSummary(summary);
   renderOpenPositions(openPos);
+  applyOpenPositionLines(openPos.open_positions || []);
+  renderPositionPanel(openPos.open_positions || [], window.__lastMark);
 
   tableState.signals.all = signals.signals || [];
   tableState.trades.all  = trades.trades   || [];
@@ -752,6 +884,7 @@ async function refreshBotData() {
   renderTradesTable();
 
   for (const tf of TFS) {
+    if (!charts["eq-" + tf]) continue;   // la pagina puede no incluir todos los TFs (live.html solo 4h)
     const eq = await fetchJSON(`${DATA_DIR}/equity_${tf}.json`, { curve: [], initial_capital_eur: 100 });
     let points = (eq.curve || [])
       .map(p => ({ time: toUnix(p.ts), value: +p.equity }))
@@ -784,8 +917,13 @@ async function init() {
     charts.live.series.attachPrimitive(HEATMAP.primitive);
   } catch (e) { console.warn("Heatmap primitive not supported:", e); }
   for (const tf of TFS) {
-    charts[tf] = makeCandleChart("chart-tf-" + tf, 260);
-    charts["eq-" + tf] = makeLineChart("chart-eq-" + tf, 180);
+    // Cada pagina decide que TFs montar incluyendo (o no) los <div id="chart-tf-XX">.
+    if (document.getElementById("chart-tf-" + tf)) {
+      charts[tf] = makeCandleChart("chart-tf-" + tf, 260);
+    }
+    if (document.getElementById("chart-eq-" + tf)) {
+      charts["eq-" + tf] = makeLineChart("chart-eq-" + tf, 180);
+    }
   }
   initDepthChart();
 
