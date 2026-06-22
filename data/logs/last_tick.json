@@ -1,19 +1,21 @@
 {
-  "tick_ts_utc": "2026-06-22T13:11:12.850828+00:00",
+  "tick_ts_utc": "2026-06-22T13:36:10.152340+00:00",
   "dry_run": false,
   "force_tf": null,
   "phases": [
     "scheduler_evaluated",
     "tick_completed"
   ],
-  "errors": [],
+  "errors": [
+    "feature_build_failed: BTC spot klines empty - cannot build features"
+  ],
   "due_timeframes": [
     {
       "timeframe": "1h",
       "candle_open_time": "2026-06-22T12:00:00+00:00",
       "candle_close_time": "2026-06-22T13:00:00+00:00",
       "is_due": true,
-      "seconds_since_eligible": 642.850844,
+      "seconds_since_eligible": 2140.152387,
       "is_late": false
     },
     {
@@ -21,18 +23,14 @@
       "candle_open_time": "2026-06-22T08:00:00+00:00",
       "candle_close_time": "2026-06-22T12:00:00+00:00",
       "is_due": true,
-      "seconds_since_eligible": 4212.850844,
+      "seconds_since_eligible": 5710.152387,
       "is_late": false
     }
   ],
   "tf_results": {
     "1h": {
-      "phase": "regime_filtered",
-      "regime": "alcista"
-    },
-    "4h": {
-      "phase": "regime_filtered",
-      "regime": "alcista"
+      "phase": "feature_build_failed",
+      "error": "BTC spot klines empty - cannot build features"
     }
   }
 }

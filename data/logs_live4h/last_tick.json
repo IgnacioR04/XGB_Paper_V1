@@ -1,21 +1,28 @@
 {
-  "tick_ts_utc": "2026-06-22T13:12:20.968541+00:00",
+  "tick_ts_utc": "2026-06-22T13:37:55.025113+00:00",
   "dry_run": false,
   "force_tf": null,
   "phases": [
     "scheduler_evaluated",
     "tick_completed"
   ],
-  "errors": [],
+  "errors": [
+    "feature_build_failed: BTC spot klines empty - cannot build features"
+  ],
   "due_timeframes": [
     {
       "timeframe": "4h",
       "candle_open_time": "2026-06-22T08:00:00+00:00",
       "candle_close_time": "2026-06-22T12:00:00+00:00",
       "is_due": true,
-      "seconds_since_eligible": 4280.968575,
+      "seconds_since_eligible": 5815.02515,
       "is_late": false
     }
   ],
-  "tf_results": {}
+  "tf_results": {
+    "4h": {
+      "phase": "feature_build_failed",
+      "error": "BTC spot klines empty - cannot build features"
+    }
+  }
 }
