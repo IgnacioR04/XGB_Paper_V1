@@ -262098,3 +262098,49 @@
 2026-06-26 03:27:23,747 | INFO    | paper_trader           | Macro cache has 79 features cached
 2026-06-26 03:27:23,747 | WARNING | paper_trader           | SKIPPED_LATE tf=4h close=2026-06-26 00:00:00+00:00
 2026-06-26 03:27:23,777 | INFO    | paper_trader           | Paper tick end.
+2026-06-26 03:32:44,195 | INFO    | paper_trader           | ============================================================
+2026-06-26 03:32:44,195 | INFO    | paper_trader           | Paper tick start (dry_run=False, profile=live4h)
+2026-06-26 03:32:44,582 | INFO    | paper_trader           | LIVE bot OK. Equity Bitget: 49.16 USDT
+2026-06-26 03:32:44,582 | INFO    | paper_trader           | Timeframes due: [('4h', False, True)]
+2026-06-26 03:32:47,412 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-26 03:32:47,412 | WARNING | paper_trader.binance_spot | Binance Spot failed for BTCUSDT 4h: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-26 03:32:47,518 | WARNING | paper_trader.binance_spot | Using Coinbase fallback for BTCUSDT 4h
+2026-06-26 03:32:50,416 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-26 03:32:50,416 | WARNING | paper_trader.binance_spot | Binance Spot failed for BTCUSDT 1m: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-26 03:32:50,554 | WARNING | paper_trader.binance_spot | Using Coinbase fallback for BTCUSDT 1m
+2026-06-26 03:32:53,530 | ERROR   | paper_trader.binance_spot | All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-26 03:32:53,531 | WARNING | paper_trader.binance_spot | Binance ticker failed for BTCUSDT: All Binance Spot hosts failed:
+  https://api3.binance.com -> HTTP 451
+  https://api2.binance.com -> HTTP 451
+  https://api1.binance.com -> HTTP 451
+  https://api4.binance.com -> HTTP 451
+  https://api.binance.com -> HTTP 451
+2026-06-26 03:32:53,597 | INFO    | paper_trader           | Closed positions this tick: 0
+2026-06-26 03:32:53,598 | INFO    | paper_trader           | Macro cache has 79 features cached
+2026-06-26 03:32:53,598 | WARNING | paper_trader           | SKIPPED_LATE tf=4h close=2026-06-26 00:00:00+00:00
+2026-06-26 03:32:53,635 | INFO    | paper_trader           | Paper tick end.
