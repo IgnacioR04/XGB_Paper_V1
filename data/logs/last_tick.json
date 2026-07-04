@@ -1,5 +1,5 @@
 {
-  "tick_ts_utc": "2026-07-04T00:56:02.754388+00:00",
+  "tick_ts_utc": "2026-07-04T01:01:34.684186+00:00",
   "dry_run": false,
   "force_tf": null,
   "phases": [
@@ -10,22 +10,26 @@
   "due_timeframes": [
     {
       "timeframe": "1h",
-      "candle_open_time": "2026-07-03T23:00:00+00:00",
-      "candle_close_time": "2026-07-04T00:00:00+00:00",
-      "is_due": false,
-      "seconds_since_eligible": 3332.754408,
-      "is_late": true
+      "candle_open_time": "2026-07-04T00:00:00+00:00",
+      "candle_close_time": "2026-07-04T01:00:00+00:00",
+      "is_due": true,
+      "seconds_since_eligible": 64.684208,
+      "is_late": false
     },
     {
       "timeframe": "4h",
       "candle_open_time": "2026-07-03T20:00:00+00:00",
       "candle_close_time": "2026-07-04T00:00:00+00:00",
       "is_due": true,
-      "seconds_since_eligible": 3302.754408,
+      "seconds_since_eligible": 3634.684208,
       "is_late": false
     }
   ],
   "tf_results": {
+    "1h": {
+      "phase": "regime_filtered",
+      "regime": "alcista"
+    },
     "4h": {
       "phase": "regime_filtered",
       "regime": "alcista"
